@@ -4,7 +4,7 @@ Copyright 2014 James LeRoy getSurreal.com
 
 Control the Neato XV Lidar with an Arduino compatible board
 
-Based on the followin work: 
+Based on the following work: 
 * Nicolas "Xevel" Saugnier https://github.com/bombilee/NXV11/
 * Cheng-Lung Lee https://github.com/bombilee/NXV11/tree/master/ArduinoMegaAdapter
 
