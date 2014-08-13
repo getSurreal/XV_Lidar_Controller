@@ -1,32 +1,43 @@
 /*
   XV Lidar Controller
-  
-  Copyright 2014 James LeRoy getSurreal
-  https://github.com/getSurreal/XV_Lidar_Controller
-  http://www.getsurreal.com/arduino/xv_lidar_controller
  
-  See README for additional information 
-*/
+ Copyright 2014 James LeRoy getSurreal
+ https://github.com/getSurreal/XV_Lidar_Controller
+ http://www.getsurreal.com/arduino/xv_lidar_controller
+ 
+ See README for additional information 
+ */
 
 #include <TimerThree.h> // used for ultrasonic PWM motor control
 #include <PID.h>
+#include <EEPROM.h>
+#include "EEPROMAnything.h"
 
 #define DEBUG_MOTOR_RPM false
 
-const int motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
+struct EEPROM_Config
+{
+  byte id;
+  int motor_pwm_pin;
+  double rpm_setpoint;  // desired RPM
+  double pwm_max;
+  double pwm_min;
 
-double rpm_setpoint = 300;  // desired RPM
-double pwm_max = 1023;
-double pwm_min = 600;
-double pwm_val = pwm_min;  // start slow
+  double Kp;
+  double Ki;
+  double Kd;
+} 
+xv_config;
+
+const byte EEPROM_ID = 0x99;  // used to validate EEPROM initialized
+
+
+double pwm_val = xv_config.pwm_min;  // start slow
 double pwm_last;
 double motor_rpm;
 
-double Kp = 1.0;
-double Ki = 0.5;
-double Kd = 0.00;
 
-PID myPID(&motor_rpm, &pwm_val, &rpm_setpoint,Kp,Ki,Kd, DIRECT);
+PID myPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint,xv_config.Kp,xv_config.Ki,xv_config.Kd, DIRECT);
 
 int inByte = 0;  // incoming serial byte
 unsigned char data_status = 0;
@@ -38,14 +49,18 @@ int motor_rph = 0;
 
 
 void setup() {
-  pinMode(motor_pwm_pin, OUTPUT); 
+  EEPROM_readAnything(0, xv_config);
+  if( xv_config.id != EEPROM_ID) { // verify EEPROM values have been initialized
+    initEEPROM();
+  }
+  pinMode(xv_config.motor_pwm_pin, OUTPUT); 
   Serial.begin(115200);  // USB serial
   Serial1.begin(115200);  // XV LDS data 
 
   Timer3.initialize(30); // set PWM frequency to 32.768kHz  
-  Timer3.pwm(motor_pwm_pin, pwm_val); // replacement for analogWrite()
+  Timer3.pwm(xv_config.motor_pwm_pin, pwm_val); // replacement for analogWrite()
 
-  myPID.SetOutputLimits(pwm_min,pwm_max);
+  myPID.SetOutputLimits(xv_config.pwm_min,xv_config.pwm_max);
   myPID.SetSampleTime(20);
   myPID.SetMode(AUTOMATIC);
 }
@@ -59,7 +74,7 @@ void loop() {
   }
   myPID.Compute();
   if (pwm_val != pwm_last) {
-    Timer3.pwm(motor_pwm_pin, pwm_val);
+    Timer3.pwm(xv_config.motor_pwm_pin, pwm_val);
     pwm_last = pwm_val;
   }
 }
@@ -119,15 +134,30 @@ void readData(unsigned char inByte) {
     motor_rph_high_byte = inByte;
     motor_rph = (motor_rph_high_byte << 8) | motor_rph_low_byte;
     motor_rpm = float( (motor_rph_high_byte << 8) | motor_rph_low_byte ) / 64.0;
-    #if DEBUG_MOTOR_RPM
-      Serial.print(motor_rph_low_byte, HEX);   
-      Serial.println(motor_rph_high_byte, HEX);   
-      Serial.print(motor_rpm);
-      Serial.print("  ");   
-      Serial.println(pwm_val);
-    #endif
+#if DEBUG_MOTOR_RPM
+    Serial.print(motor_rph_low_byte, HEX);   
+    Serial.println(motor_rph_high_byte, HEX);   
+    Serial.print(motor_rpm);
+    Serial.print("  ");   
+    Serial.println(pwm_val);
+#endif
     break;
   default: // others do checksum
     break;
   }  
 }
+
+void initEEPROM() {
+  xv_config.id = 0x99;
+  xv_config.motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
+
+  xv_config.rpm_setpoint = 300;  // desired RPM
+  xv_config.pwm_max = 1023;
+  xv_config.pwm_min = 600;
+
+  xv_config.Kp = 1.0;
+  xv_config.Ki = 0.5;
+  xv_config.Kd = 0.00;
+  EEPROM_writeAnything(0, xv_config);
+}
+
