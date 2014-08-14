@@ -14,8 +14,7 @@
 #include "EEPROMAnything.h"
 #include <SerialCommand.h>
 
-struct EEPROM_Config
-{
+struct EEPROM_Config {
   byte id;
   int motor_pwm_pin;
   double rpm_setpoint;  // desired RPM (double to be compatible with PID library)
@@ -149,9 +148,9 @@ void readData(unsigned char inByte) {
     motor_rph = (motor_rph_high_byte << 8) | motor_rph_low_byte;
     motor_rpm = float( (motor_rph_high_byte << 8) | motor_rph_low_byte ) / 64.0;
     if (debug_motor_rpm) {
-//      Serial.print("Motor RPH HEX: ");
-//      Serial.print(motor_rph_low_byte, HEX);   
-//      Serial.println(motor_rph_high_byte, HEX);   
+      //      Serial.print("Motor RPH HEX: ");
+      //      Serial.print(motor_rph_low_byte, HEX);   
+      //      Serial.println(motor_rph_high_byte, HEX);   
       Serial.print("RPM: ");
       Serial.print(motor_rpm);
       Serial.print("  PWM: ");   
@@ -398,5 +397,6 @@ void getConfig() {
 void saveConfig() {
   EEPROM_writeAnything(0, xv_config);
 }
+
 
 

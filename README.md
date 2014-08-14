@@ -1,4 +1,4 @@
-XV-Lidar-Controller
+XV Lidar Controller
 ===================
 Copyright 2014 James LeRoy getSurreal.com
 
