@@ -20,7 +20,7 @@ struct EEPROM_Config
 {
   byte id;
   int motor_pwm_pin;
-  double rpm_setpoint;  // desired RPM
+  double rpm_setpoint;  // desired RPM (double to be compatible with PID library)
   double pwm_max;
   double pwm_min;
 
@@ -35,6 +35,8 @@ const byte EEPROM_ID = 0x99;  // used to validate EEPROM initialized
 double pwm_val = xv_config.pwm_min;  // start slow
 double pwm_last;
 double motor_rpm;
+
+boolean motor_enable = true;
 
 PID myPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint,xv_config.Kp,xv_config.Ki,xv_config.Kd, DIRECT);
 
@@ -63,24 +65,29 @@ void setup() {
   myPID.SetOutputLimits(xv_config.pwm_min,xv_config.pwm_max);
   myPID.SetSampleTime(20);
   myPID.SetMode(AUTOMATIC);
-  
+
   initSerialCommands();
 }
 
 void loop() {
+
   sCmd.readSerial();  // check for incoming serial commands
-  
+
   // read byte from LIDAR and retransmit to USB
   if (Serial1.available() > 0) {
     inByte = Serial1.read();  // get incoming byte:
     Serial.print(inByte, BYTE);  // retransmit
     decodeData(inByte);
   }
-  myPID.Compute();
-  if (pwm_val != pwm_last) {
-    Timer3.pwm(xv_config.motor_pwm_pin, pwm_val);
-    pwm_last = pwm_val;
+
+  if (motor_enable) {  
+    myPID.Compute();
+    if (pwm_val != pwm_last) {
+      Timer3.pwm(xv_config.motor_pwm_pin, pwm_val);
+      pwm_last = pwm_val;
+    }
   }
+
 }
 
 void decodeData(unsigned char inByte) {
@@ -166,11 +173,161 @@ void initEEPROM() {
 }
 
 void initSerialCommands() {
-  sCmd.addCommand("MOTOROFF",    motorOff);
+  sCmd.addCommand("help",    help);
+  sCmd.addCommand("Help",    help);
+  sCmd.addCommand("GetConfig",    getConfig);
+  sCmd.addCommand("SetRPM",    setRPM);
+  sCmd.addCommand("SetKp",    setKp);
+  sCmd.addCommand("SetKi",    setKi);
+  sCmd.addCommand("SetKd",    setKd);
+
+  sCmd.addCommand("MotorOff",    motorOff);
+  sCmd.addCommand("MotorOn",     motorOn);
+
+  // XV Commands  
+  sCmd.addCommand("GetPrompt",  getPrompt);
+  sCmd.addCommand("GetVersion",  getVersion);
 }
 
 void motorOff() {
-  myPID.SetMode(MANUAL);
+  motor_enable = false;
   Timer3.pwm(xv_config.motor_pwm_pin, 0);
-  pwm_last = 0;
+  Serial.println("Motor off");
 }
+
+void motorOn() {
+  motor_enable = true;
+  Timer3.pwm(xv_config.motor_pwm_pin, xv_config.pwm_min);
+  Serial.println("Motor on");
+}
+
+void setRPM() {
+  double sVal;
+  char *arg;
+  boolean syntax_error = false;
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    sVal = atof(arg);    // Converts a char string to an integer
+  }
+  else {
+    syntax_error = true;
+  }
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    syntax_error = true;
+  }
+
+  if (syntax_error) {
+    Serial.println("Incorrect syntax.  Example: SetRPM 300"); 
+  }
+  else {
+    Serial.print("Setting RPM to: ");
+    Serial.println(sVal);
+    Serial.println(xv_config.rpm_setpoint);
+    xv_config.rpm_setpoint = sVal;
+    Serial.println(xv_config.rpm_setpoint);    
+  }
+}
+
+void setKp() {
+  double sVal;
+  char *arg;
+  boolean syntax_error = false;
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    sVal = atof(arg);    // Converts a char string to an integer
+  }
+  else {
+    syntax_error = true;
+  }
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    syntax_error = true;
+  }
+
+  if (syntax_error) {
+    Serial.println("Incorrect syntax.  Example: SetKp 1.0"); 
+  }
+  else {
+    Serial.print("Setting Kp to: ");
+    Serial.println(sVal);    
+  }
+}
+
+void setKi() {
+  double sVal;
+  char *arg;
+  boolean syntax_error = false;
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    sVal = atof(arg);    // Converts a char string to an integer
+  }
+  else {
+    syntax_error = true;
+  }
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    syntax_error = true;
+  }
+
+  if (syntax_error) {
+    Serial.println("Incorrect syntax.  Example: SetKp 1.0"); 
+  }
+  else {
+    Serial.print("Setting Ki to: ");
+    Serial.println(sVal);    
+  }
+}
+
+void setKd() {
+  double sVal;
+  char *arg;
+  boolean syntax_error = false;
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    sVal = atof(arg);    // Converts a char string to an integer
+  }
+  else {
+    syntax_error = true;
+  }
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    syntax_error = true;
+  }
+
+  if (syntax_error) {
+    Serial.println("Incorrect syntax.  Example: SetKp 1.0"); 
+  }
+  else {
+    Serial.print("Setting Kd to: ");
+    Serial.println(sVal);    
+  }
+}
+
+void getPrompt() {
+  Serial1.print(0x1B, BYTE);
+}
+
+void getVersion() {
+  Serial1.print("GetVersion");
+}
+
+void help() {
+  Serial.println("List of available commands");
+  Serial.println("All commands are case sensitive");
+
+}
+
+void getConfig() {
+
+}
+
+
