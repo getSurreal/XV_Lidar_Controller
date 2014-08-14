@@ -14,8 +14,6 @@
 #include "EEPROMAnything.h"
 #include <SerialCommand.h>
 
-#define DEBUG_MOTOR_RPM false
-
 struct EEPROM_Config
 {
   byte id;
@@ -32,13 +30,15 @@ xv_config;
 
 const byte EEPROM_ID = 0x99;  // used to validate EEPROM initialized
 
-double pwm_val = xv_config.pwm_min;  // start slow
+double pwm_val;
 double pwm_last;
 double motor_rpm;
 
+boolean debug_motor_rpm = false;
 boolean motor_enable = true;
+boolean retransmit = true;
 
-PID myPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint,xv_config.Kp,xv_config.Ki,xv_config.Kd, DIRECT);
+PID rpmPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint, xv_config.Kp, xv_config.Ki, xv_config.Kd, DIRECT);
 
 int inByte = 0;  // incoming serial byte
 unsigned char data_status = 0;
@@ -60,11 +60,12 @@ void setup() {
   Serial1.begin(115200);  // XV LDS data 
 
   Timer3.initialize(30); // set PWM frequency to 32.768kHz  
-  Timer3.pwm(xv_config.motor_pwm_pin, pwm_val); // replacement for analogWrite()
+  Timer3.pwm(xv_config.motor_pwm_pin, xv_config.pwm_min); // replacement for analogWrite() 
 
-  myPID.SetOutputLimits(xv_config.pwm_min,xv_config.pwm_max);
-  myPID.SetSampleTime(20);
-  myPID.SetMode(AUTOMATIC);
+  rpmPID.SetOutputLimits(xv_config.pwm_min,xv_config.pwm_max);
+  rpmPID.SetSampleTime(20);
+  rpmPID.SetTunings(xv_config.Kp, xv_config.Ki, xv_config.Kd);
+  rpmPID.SetMode(AUTOMATIC);
 
   initSerialCommands();
 }
@@ -76,12 +77,14 @@ void loop() {
   // read byte from LIDAR and retransmit to USB
   if (Serial1.available() > 0) {
     inByte = Serial1.read();  // get incoming byte:
-    Serial.print(inByte, BYTE);  // retransmit
+    if (retransmit) {
+      Serial.print(inByte, BYTE);  // retransmit
+    }
     decodeData(inByte);
   }
 
   if (motor_enable) {  
-    myPID.Compute();
+    rpmPID.Compute();
     if (pwm_val != pwm_last) {
       Timer3.pwm(xv_config.motor_pwm_pin, pwm_val);
       pwm_last = pwm_val;
@@ -145,13 +148,15 @@ void readData(unsigned char inByte) {
     motor_rph_high_byte = inByte;
     motor_rph = (motor_rph_high_byte << 8) | motor_rph_low_byte;
     motor_rpm = float( (motor_rph_high_byte << 8) | motor_rph_low_byte ) / 64.0;
-#if DEBUG_MOTOR_RPM
-    Serial.print(motor_rph_low_byte, HEX);   
-    Serial.println(motor_rph_high_byte, HEX);   
-    Serial.print(motor_rpm);
-    Serial.print("  ");   
-    Serial.println(pwm_val);
-#endif
+    if (debug_motor_rpm) {
+//      Serial.print("Motor RPH HEX: ");
+//      Serial.print(motor_rph_low_byte, HEX);   
+//      Serial.println(motor_rph_high_byte, HEX);   
+      Serial.print("RPM: ");
+      Serial.print(motor_rpm);
+      Serial.print("  PWM: ");   
+      Serial.println(pwm_val);
+    }
     break;
   default: // others do checksum
     break;
@@ -173,20 +178,37 @@ void initEEPROM() {
 }
 
 void initSerialCommands() {
-  sCmd.addCommand("help",    help);
-  sCmd.addCommand("Help",    help);
-  sCmd.addCommand("GetConfig",    getConfig);
-  sCmd.addCommand("SetRPM",    setRPM);
-  sCmd.addCommand("SetKp",    setKp);
-  sCmd.addCommand("SetKi",    setKi);
-  sCmd.addCommand("SetKd",    setKd);
+  sCmd.addCommand("help",       help);
+  sCmd.addCommand("Help",       help);
+  sCmd.addCommand("GetConfig",  getConfig);
+  sCmd.addCommand("SaveConfig", saveConfig);
+  sCmd.addCommand("ResetConfig",initEEPROM);
 
-  sCmd.addCommand("MotorOff",    motorOff);
-  sCmd.addCommand("MotorOn",     motorOn);
+  sCmd.addCommand("SetRPM",  setRPM);
+  sCmd.addCommand("SetKp",   setKp);
+  sCmd.addCommand("SetKi",   setKi);
+  sCmd.addCommand("SetKd",   setKd);
+
+  sCmd.addCommand("ShowRPM",       showRPM);
+  sCmd.addCommand("HideRPM",       hideRPM);
+  sCmd.addCommand("MotorOff",      motorOff);
+  sCmd.addCommand("MotorOn",       motorOn);
+  sCmd.addCommand("RetransmitOff", retransmitOff);
+  sCmd.addCommand("RetransmitOn",  retransmitOn);
 
   // XV Commands  
   sCmd.addCommand("GetPrompt",  getPrompt);
   sCmd.addCommand("GetVersion",  getVersion);
+}
+
+void showRPM() {
+  debug_motor_rpm = true;
+  Serial.println("Showing RPM data");
+}
+
+void hideRPM() {
+  debug_motor_rpm = false;
+  Serial.println("Hiding RPM data");
 }
 
 void motorOff() {
@@ -199,6 +221,16 @@ void motorOn() {
   motor_enable = true;
   Timer3.pwm(xv_config.motor_pwm_pin, xv_config.pwm_min);
   Serial.println("Motor on");
+}
+
+void retransmitOff() {
+  retransmit = false;
+  Serial.println("Lidar data disabled");
+}
+
+void retransmitOn() {
+  retransmit = true;
+  Serial.println("Lidar data enabled");
 }
 
 void setRPM() {
@@ -254,7 +286,9 @@ void setKp() {
   }
   else {
     Serial.print("Setting Kp to: ");
-    Serial.println(sVal);    
+    Serial.println(sVal);
+    xv_config.Kp = sVal;
+    rpmPID.SetTunings(xv_config.Kp, xv_config.Ki, xv_config.Kd);
   }
 }
 
@@ -282,6 +316,8 @@ void setKi() {
   else {
     Serial.print("Setting Ki to: ");
     Serial.println(sVal);    
+    xv_config.Ki = sVal;
+    rpmPID.SetTunings(xv_config.Kp, xv_config.Ki, xv_config.Kd);
   }
 }
 
@@ -309,6 +345,8 @@ void setKd() {
   else {
     Serial.print("Setting Kd to: ");
     Serial.println(sVal);    
+    xv_config.Kd = sVal;
+    rpmPID.SetTunings(xv_config.Kp, xv_config.Ki, xv_config.Kd);
   }
 }
 
@@ -321,13 +359,44 @@ void getVersion() {
 }
 
 void help() {
-  Serial.println("List of available commands");
-  Serial.println("All commands are case sensitive");
-
+  Serial.println("List of available commands (case sensitive");
+  Serial.println("  GetConfig");
+  Serial.println("  SaveConfig");
+  Serial.println("  ResetConfig");
+  Serial.println("  SetRPM");
+  Serial.println("  SetKp");
+  Serial.println("  SetKi");
+  Serial.println("  SetKp");
+  Serial.println("  ShowRPM");
+  Serial.println("  HideRPM");
+  Serial.println("  MotorOff");
+  Serial.println("  MotorOn");
+  Serial.println("  RetransmitOff");
+  Serial.println("  RetransmitOn");
 }
 
 void getConfig() {
+  Serial.print("PWM pin: ");
+  Serial.println(xv_config.motor_pwm_pin);
 
+  Serial.print("Target RPM: ");
+  Serial.println(xv_config.rpm_setpoint);
+
+  Serial.print("Max PWM: ");
+  Serial.println(xv_config.pwm_max);
+  Serial.print("Min PWM: ");
+  Serial.println(xv_config.pwm_min);
+
+  Serial.print("PID Kp: ");
+  Serial.println(xv_config.Kp);
+  Serial.print("PID Ki: ");
+  Serial.println(xv_config.Ki);
+  Serial.print("PID Kd: ");
+  Serial.println(xv_config.Kd);
+}
+
+void saveConfig() {
+  EEPROM_writeAnything(0, xv_config);
 }
 
 
