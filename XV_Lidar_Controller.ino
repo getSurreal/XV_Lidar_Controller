@@ -12,6 +12,7 @@
 #include <PID.h>
 #include <EEPROM.h>
 #include "EEPROMAnything.h"
+#include <SerialCommand.h>
 
 #define DEBUG_MOTOR_RPM false
 
@@ -31,11 +32,9 @@ xv_config;
 
 const byte EEPROM_ID = 0x99;  // used to validate EEPROM initialized
 
-
 double pwm_val = xv_config.pwm_min;  // start slow
 double pwm_last;
 double motor_rpm;
-
 
 PID myPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint,xv_config.Kp,xv_config.Ki,xv_config.Kd, DIRECT);
 
@@ -47,6 +46,7 @@ unsigned char motor_rph_high_byte = 0;
 unsigned char motor_rph_low_byte = 0;
 int motor_rph = 0;
 
+SerialCommand sCmd;
 
 void setup() {
   EEPROM_readAnything(0, xv_config);
@@ -63,9 +63,13 @@ void setup() {
   myPID.SetOutputLimits(xv_config.pwm_min,xv_config.pwm_max);
   myPID.SetSampleTime(20);
   myPID.SetMode(AUTOMATIC);
+  
+  initSerialCommands();
 }
 
 void loop() {
+  sCmd.readSerial();  // check for incoming serial commands
+  
   // read byte from LIDAR and retransmit to USB
   if (Serial1.available() > 0) {
     inByte = Serial1.read();  // get incoming byte:
@@ -161,3 +165,12 @@ void initEEPROM() {
   EEPROM_writeAnything(0, xv_config);
 }
 
+void initSerialCommands() {
+  sCmd.addCommand("MOTOROFF",    motorOff);
+}
+
+void motorOff() {
+  myPID.SetMode(MANUAL);
+  Timer3.pwm(xv_config.motor_pwm_pin, 0);
+  pwm_last = 0;
+}
