@@ -24,18 +24,19 @@ struct EEPROM_Config {
   double Kp;
   double Ki;
   double Kd;
+  
+  boolean motor_enable;
+  boolean relay;
 } 
 xv_config;
 
-const byte EEPROM_ID = 0x99;  // used to validate EEPROM initialized
+const byte EEPROM_ID = 0x01;  // used to validate EEPROM initialized
 
 double pwm_val;
 double pwm_last;
 double motor_rpm;
 
 boolean debug_motor_rpm = false;
-boolean motor_enable = true;
-boolean relay = true;
 
 PID rpmPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint, xv_config.Kp, xv_config.Ki, xv_config.Kd, DIRECT);
 
@@ -76,13 +77,13 @@ void loop() {
   // read byte from LIDAR and relay to USB
   if (Serial1.available() > 0) {
     inByte = Serial1.read();  // get incoming byte:
-    if (relay) {
+    if (xv_config.relay) {
       Serial.print(inByte, BYTE);  // relay
     }
     decodeData(inByte);
   }
 
-  if (motor_enable) {  
+  if (xv_config.motor_enable) {  
     rpmPID.Compute();
     if (pwm_val != pwm_last) {
       Timer3.pwm(xv_config.motor_pwm_pin, pwm_val);
@@ -163,7 +164,7 @@ void readData(unsigned char inByte) {
 }
 
 void initEEPROM() {
-  xv_config.id = 0x99;
+  xv_config.id = 0x01;
   xv_config.motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
 
   xv_config.rpm_setpoint = 300;  // desired RPM
@@ -173,6 +174,9 @@ void initEEPROM() {
   xv_config.Kp = 1.0;
   xv_config.Ki = 0.5;
   xv_config.Kd = 0.00;
+
+  xv_config.motor_enable = true;
+  xv_config.relay = true;
   EEPROM_writeAnything(0, xv_config);
 }
 
@@ -211,24 +215,24 @@ void hideRPM() {
 }
 
 void motorOff() {
-  motor_enable = false;
+  xv_config.motor_enable = false;
   Timer3.pwm(xv_config.motor_pwm_pin, 0);
   Serial.println("Motor off");
 }
 
 void motorOn() {
-  motor_enable = true;
+  xv_config.motor_enable = true;
   Timer3.pwm(xv_config.motor_pwm_pin, xv_config.pwm_min);
   Serial.println("Motor on");
 }
 
 void relayOff() {
-  relay = false;
+  xv_config.relay = false;
   Serial.println("Lidar data disabled");
 }
 
 void relayOn() {
-  relay = true;
+  xv_config.relay = true;
   Serial.println("Lidar data enabled");
 }
 
@@ -392,6 +396,11 @@ void getConfig() {
   Serial.println(xv_config.Ki);
   Serial.print("PID Kd: ");
   Serial.println(xv_config.Kd);
+
+  Serial.print("Motor Enable: ");
+  Serial.println(xv_config.motor_enable);
+  Serial.print("Realy: ");
+  Serial.println(xv_config.relay);
 }
 
 void saveConfig() {
