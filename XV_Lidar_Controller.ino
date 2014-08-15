@@ -233,7 +233,7 @@ void relayOn() {
 }
 
 void setRPM() {
-  double sVal;
+  double sVal = 0.0;
   char *arg;
   boolean syntax_error = false;
 
@@ -263,7 +263,7 @@ void setRPM() {
 }
 
 void setKp() {
-  double sVal;
+  double sVal = 0.0;
   char *arg;
   boolean syntax_error = false;
 
@@ -292,7 +292,7 @@ void setKp() {
 }
 
 void setKi() {
-  double sVal;
+  double sVal = 0.0;
   char *arg;
   boolean syntax_error = false;
 
@@ -321,7 +321,7 @@ void setKi() {
 }
 
 void setKd() {
-  double sVal;
+  double sVal = 0.0;
   char *arg;
   boolean syntax_error = false;
 
