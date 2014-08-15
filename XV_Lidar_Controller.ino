@@ -35,7 +35,7 @@ double motor_rpm;
 
 boolean debug_motor_rpm = false;
 boolean motor_enable = true;
-boolean retransmit = true;
+boolean relay = true;
 
 PID rpmPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint, xv_config.Kp, xv_config.Ki, xv_config.Kd, DIRECT);
 
@@ -73,11 +73,11 @@ void loop() {
 
   sCmd.readSerial();  // check for incoming serial commands
 
-  // read byte from LIDAR and retransmit to USB
+  // read byte from LIDAR and relay to USB
   if (Serial1.available() > 0) {
     inByte = Serial1.read();  // get incoming byte:
-    if (retransmit) {
-      Serial.print(inByte, BYTE);  // retransmit
+    if (relay) {
+      Serial.print(inByte, BYTE);  // relay
     }
     decodeData(inByte);
   }
@@ -192,8 +192,8 @@ void initSerialCommands() {
   sCmd.addCommand("HideRPM",       hideRPM);
   sCmd.addCommand("MotorOff",      motorOff);
   sCmd.addCommand("MotorOn",       motorOn);
-  sCmd.addCommand("RetransmitOff", retransmitOff);
-  sCmd.addCommand("RetransmitOn",  retransmitOn);
+  sCmd.addCommand("RelayOff", relayOff);
+  sCmd.addCommand("RelayOn",  relayOn);
 
   // XV Commands  
   sCmd.addCommand("GetPrompt",  getPrompt);
@@ -222,13 +222,13 @@ void motorOn() {
   Serial.println("Motor on");
 }
 
-void retransmitOff() {
-  retransmit = false;
+void relayOff() {
+  relay = false;
   Serial.println("Lidar data disabled");
 }
 
-void retransmitOn() {
-  retransmit = true;
+void relayOn() {
+  relay = true;
   Serial.println("Lidar data enabled");
 }
 
@@ -358,7 +358,7 @@ void getVersion() {
 }
 
 void help() {
-  Serial.println("List of available commands (case sensitive");
+  Serial.println("List of available commands (case sensitive)");
   Serial.println("  GetConfig");
   Serial.println("  SaveConfig");
   Serial.println("  ResetConfig");
@@ -370,8 +370,8 @@ void help() {
   Serial.println("  HideRPM");
   Serial.println("  MotorOff");
   Serial.println("  MotorOn");
-  Serial.println("  RetransmitOff");
-  Serial.println("  RetransmitOn");
+  Serial.println("  RelayOff");
+  Serial.println("  RelayOn");
 }
 
 void getConfig() {
