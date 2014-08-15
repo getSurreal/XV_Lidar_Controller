@@ -1,13 +1,12 @@
-XV Lidar Controller
-===================
+XV Lidar Controller v1.1
+========================
 Control the Neato XV Lidar with an Arduino compatible board
 
 Used as an interface board to connect directly to the Neato XV Lidar and control the rotation speed through Pulse Width Modulation (PWM).
 
-http://www.getsurreal.com/arduino/xv_lidar_controller
-https://github.com/getSurreal/XV_Lidar_Controller
-
 Copyright 2014 James LeRoy getSurreal.com
+* http://www.getsurreal.com/arduino/xv_lidar_controller
+* https://github.com/getSurreal/XV_Lidar_Controller
 
 Based on the following work: 
 * Nicolas "Xevel" Saugnier https://github.com/bombilee/NXV11/
@@ -32,6 +31,8 @@ The XV Lidar Controller receives the serial data from the XV Lidar looking for t
  http://www.pjrc.com/teensy/teensyduino.html
 * Copy the included libraries to the Arduino libraries directory
 
+##Usage
+Connect to the Teensy USB port at 115200 baud.  When sending commands use newline to signify the end of a command.  Before sending most commands it's helpful to stop the streaming of serial data with RelayOff.
 
 ##Commands
 * Help
