@@ -60,7 +60,6 @@ void setup() {
   Serial1.begin(115200);  // XV LDS data 
 
   Timer3.initialize(30); // set PWM frequency to 32.768kHz  
-  Timer3.pwm(xv_config.motor_pwm_pin, xv_config.pwm_min); // replacement for analogWrite() 
 
   rpmPID.SetOutputLimits(xv_config.pwm_min,xv_config.pwm_max);
   rpmPID.SetSampleTime(20);
@@ -86,7 +85,7 @@ void loop() {
   if (xv_config.motor_enable) {  
     rpmPID.Compute();
     if (pwm_val != pwm_last) {
-      Timer3.pwm(xv_config.motor_pwm_pin, pwm_val);
+      Timer3.pwm(xv_config.motor_pwm_pin, pwm_val);  // replacement for analogWrite()
       pwm_last = pwm_val;
     }
   }
@@ -399,12 +398,13 @@ void getConfig() {
 
   Serial.print("Motor Enable: ");
   Serial.println(xv_config.motor_enable);
-  Serial.print("Realy: ");
+  Serial.print("Relay: ");
   Serial.println(xv_config.relay);
 }
 
 void saveConfig() {
   EEPROM_writeAnything(0, xv_config);
+  Serial.println("Config Saved.");
 }
 
 
