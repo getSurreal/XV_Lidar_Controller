@@ -20,6 +20,7 @@ struct EEPROM_Config {
   double rpm_setpoint;  // desired RPM (uses double to be compatible with PID library)
   double pwm_max;  // max analog value.  probably never needs to change from 1023
   double pwm_min;  // min analog pulse value to spin the motor
+  int sample_time;  // how often to calculate the PID values
 
   // PID tuning values
   double Kp;
@@ -31,7 +32,7 @@ struct EEPROM_Config {
 } 
 xv_config;
 
-const byte EEPROM_ID = 0x01;  // used to validate EEPROM initialized
+const byte EEPROM_ID = 0x02;  // used to validate EEPROM initialized
 
 double pwm_val;
 double pwm_last;
@@ -63,7 +64,7 @@ void setup() {
   Timer3.initialize(30); // set PWM frequency to 32.768kHz  
 
   rpmPID.SetOutputLimits(xv_config.pwm_min,xv_config.pwm_max);
-  rpmPID.SetSampleTime(20);
+  rpmPID.SetSampleTime(xv_config.sample_time);
   rpmPID.SetTunings(xv_config.Kp, xv_config.Ki, xv_config.Kd);
   rpmPID.SetMode(AUTOMATIC);
 
@@ -164,12 +165,13 @@ void readData(unsigned char inByte) {
 }
 
 void initEEPROM() {
-  xv_config.id = 0x01;
+  xv_config.id = 0x02;
   xv_config.motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
 
   xv_config.rpm_setpoint = 300;  // desired RPM
   xv_config.pwm_max = 1023;
   xv_config.pwm_min = 600;
+  xv_config.sample_time = 20;
 
   xv_config.Kp = 1.0;
   xv_config.Ki = 0.5;
@@ -187,10 +189,11 @@ void initSerialCommands() {
   sCmd.addCommand("SaveConfig", saveConfig);
   sCmd.addCommand("ResetConfig",initEEPROM);
 
-  sCmd.addCommand("SetRPM",  setRPM);
-  sCmd.addCommand("SetKp",   setKp);
-  sCmd.addCommand("SetKi",   setKi);
-  sCmd.addCommand("SetKd",   setKd);
+  sCmd.addCommand("SetRPM",        setRPM);
+  sCmd.addCommand("SetKp",         setKp);
+  sCmd.addCommand("SetKi",         setKi);
+  sCmd.addCommand("SetKd",         setKd);
+  sCmd.addCommand("SetSampleTime", setSampleTime);
 
   sCmd.addCommand("ShowRPM",  showRPM);
   sCmd.addCommand("HideRPM",  hideRPM);
@@ -350,6 +353,35 @@ void setKd() {
     Serial.println(sVal);    
     xv_config.Kd = sVal;
     rpmPID.SetTunings(xv_config.Kp, xv_config.Ki, xv_config.Kd);
+  }
+}
+
+void setSampleTime() {
+  double sVal = 0.0;
+  char *arg;
+  boolean syntax_error = false;
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    sVal = atoi(arg);    // Converts a char string to an integer
+  }
+  else {
+    syntax_error = true;
+  }
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    syntax_error = true;
+  }
+
+  if (syntax_error) {
+    Serial.println("Incorrect syntax.  Example: SetSampleTime 20"); 
+  }
+  else {
+    Serial.print("Setting Sample time to: ");
+    Serial.println(sVal);    
+    xv_config.sample_time = sVal;
+    rpmPID.SetSampleTime(xv_config.sample_time);
   }
 }
 
