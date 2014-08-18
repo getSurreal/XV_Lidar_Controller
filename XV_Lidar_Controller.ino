@@ -16,17 +16,18 @@
 
 struct EEPROM_Config {
   byte id;
-  int motor_pwm_pin;
-  double rpm_setpoint;  // desired RPM (double to be compatible with PID library)
-  double pwm_max;
-  double pwm_min;
+  int motor_pwm_pin;  // pin connected to mosfet for motor speed control
+  double rpm_setpoint;  // desired RPM (uses double to be compatible with PID library)
+  double pwm_max;  // max analog value.  probably never needs to change from 1023
+  double pwm_min;  // min analog pulse value to spin the motor
 
+  // PID tuning values
   double Kp;
   double Ki;
   double Kd;
   
-  boolean motor_enable;
-  boolean relay;
+  boolean motor_enable;  // to spin the laser or not.  No data when not spinning
+  boolean relay;  // to retransmit the seiral data to the USB port
 } 
 xv_config;
 
@@ -36,7 +37,7 @@ double pwm_val;
 double pwm_last;
 double motor_rpm;
 
-boolean debug_motor_rpm = false;
+boolean debug_motor_rpm = false;  // controlled by ShowRPM and HideRPM commands
 
 PID rpmPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint, xv_config.Kp, xv_config.Ki, xv_config.Kd, DIRECT);
 
@@ -191,16 +192,16 @@ void initSerialCommands() {
   sCmd.addCommand("SetKi",   setKi);
   sCmd.addCommand("SetKd",   setKd);
 
-  sCmd.addCommand("ShowRPM",       showRPM);
-  sCmd.addCommand("HideRPM",       hideRPM);
-  sCmd.addCommand("MotorOff",      motorOff);
-  sCmd.addCommand("MotorOn",       motorOn);
+  sCmd.addCommand("ShowRPM",  showRPM);
+  sCmd.addCommand("HideRPM",  hideRPM);
+  sCmd.addCommand("MotorOff", motorOff);
+  sCmd.addCommand("MotorOn",  motorOn);
   sCmd.addCommand("RelayOff", relayOff);
   sCmd.addCommand("RelayOn",  relayOn);
 
   // XV Commands  
   sCmd.addCommand("GetPrompt",  getPrompt);
-  sCmd.addCommand("GetVersion",  getVersion);
+  sCmd.addCommand("GetVersion", getVersion);
 }
 
 void showRPM() {
@@ -242,7 +243,7 @@ void setRPM() {
 
   arg = sCmd.next();
   if (arg != NULL) {
-    sVal = atof(arg);    // Converts a char string to an integer
+    sVal = atof(arg);    // Converts a char string to a float
   }
   else {
     syntax_error = true;
@@ -272,7 +273,7 @@ void setKp() {
 
   arg = sCmd.next();
   if (arg != NULL) {
-    sVal = atof(arg);    // Converts a char string to an integer
+    sVal = atof(arg);    // Converts a char string to a float
   }
   else {
     syntax_error = true;
@@ -301,7 +302,7 @@ void setKi() {
 
   arg = sCmd.next();
   if (arg != NULL) {
-    sVal = atof(arg);    // Converts a char string to an integer
+    sVal = atof(arg);    // Converts a char string to a float
   }
   else {
     syntax_error = true;
@@ -313,7 +314,7 @@ void setKi() {
   }
 
   if (syntax_error) {
-    Serial.println("Incorrect syntax.  Example: SetKp 1.0"); 
+    Serial.println("Incorrect syntax.  Example: SetKi 0.5"); 
   }
   else {
     Serial.print("Setting Ki to: ");
@@ -330,7 +331,7 @@ void setKd() {
 
   arg = sCmd.next();
   if (arg != NULL) {
-    sVal = atof(arg);    // Converts a char string to an integer
+    sVal = atof(arg);    // Converts a char string to a float
   }
   else {
     syntax_error = true;
@@ -342,7 +343,7 @@ void setKd() {
   }
 
   if (syntax_error) {
-    Serial.println("Incorrect syntax.  Example: SetKp 1.0"); 
+    Serial.println("Incorrect syntax.  Example: SetKd 0.001"); 
   }
   else {
     Serial.print("Setting Kd to: ");
