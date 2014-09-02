@@ -3,7 +3,7 @@
  
  Copyright 2014 James LeRoy getSurreal
  https://github.com/getSurreal/XV_Lidar_Controller
- http://www.getsurreal.com/arduino/xv_lidar_controller
+ http://www.getsurreal.com/products/xv-lidar-controller
  
  See README for additional information 
  */
