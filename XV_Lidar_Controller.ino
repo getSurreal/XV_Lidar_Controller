@@ -402,6 +402,7 @@ void help() {
   Serial.println("  SetKp");
   Serial.println("  SetKi");
   Serial.println("  SetKp");
+  Serial.println("  SetSampleTime");
   Serial.println("  ShowRPM");
   Serial.println("  HideRPM");
   Serial.println("  MotorOff");
@@ -428,6 +429,8 @@ void getConfig() {
   Serial.println(xv_config.Ki);
   Serial.print("PID Kd: ");
   Serial.println(xv_config.Kd);
+  Serial.print("SampleTime: ");
+  Serial.println(xv_config.sample_time);
 
   Serial.print("Motor Enable: ");
   Serial.println(xv_config.motor_enable);
