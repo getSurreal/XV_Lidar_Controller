@@ -22,7 +22,7 @@ The XV Lidar Controller receives the serial data from the XV Lidar looking for t
 ###Hardware
 * Neato XV Lidar - Available on eBay
 * Teensy 2.0 http://www.pjrc.com/teensy
-* XV Lidar Controller Board by getSurreal http://www.getsurreal.com/arduino/xv_lidar_controller
+* XV Lidar Controller Board by getSurreal http://www.getsurreal.com/xv-lidar-controller
 * Firmware https://github.com/getSurreal/XV_Lidar_Controller
 
 
