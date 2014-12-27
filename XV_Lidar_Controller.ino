@@ -1,5 +1,5 @@
 /*
-  XV Lidar Controller
+  XV Lidar Controller v1.2.0
  
  Copyright 2014 James LeRoy getSurreal
  https://github.com/getSurreal/XV_Lidar_Controller
@@ -26,29 +26,35 @@ struct EEPROM_Config {
   double Kp;
   double Ki;
   double Kd;
-  
+
   boolean motor_enable;  // to spin the laser or not.  No data when not spinning
-  boolean relay;  // to retransmit the seiral data to the USB port
+  boolean raw_data;  // to retransmit the seiral data to the USB port
 } 
 xv_config;
 
-const byte EEPROM_ID = 0x02;  // used to validate EEPROM initialized
+const byte EEPROM_ID = 0x03;  // used to validate EEPROM initialized
 
 double pwm_val;
 double pwm_last;
 double motor_rpm;
 
 boolean debug_motor_rpm = false;  // controlled by ShowRPM and HideRPM commands
+boolean debug_dist = false;  //  controlled by ShowDist and HideDist commands
+int debug_angle = 360;  // controlled by ShowAngle (0 - 359, 360 shows all)
 
 PID rpmPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint, xv_config.Kp, xv_config.Ki, xv_config.Kd, DIRECT);
 
-int inByte = 0;  // incoming serial byte
-unsigned char data_status = 0;
-unsigned char data_4deg_index = 0;
-unsigned char data_loop_index = 0;
-unsigned char motor_rph_high_byte = 0; 
-unsigned char motor_rph_low_byte = 0;
-int motor_rph = 0;
+uint8_t inByte = 0;  // incoming serial byte
+uint16_t data_status = 0;
+uint16_t data_4deg_index = 0;
+uint16_t data_loop_index = 0;
+uint8_t motor_rph_high_byte = 0; 
+uint8_t motor_rph_low_byte = 0;
+uint8_t data0, data2;
+uint16_t dist, quality;
+uint16_t motor_rph = 0;
+
+uint16_t angle;
 
 SerialCommand sCmd;
 
@@ -78,7 +84,7 @@ void loop() {
   // read byte from LIDAR and relay to USB
   if (Serial1.available() > 0) {
     inByte = Serial1.read();  // get incoming byte:
-    if (xv_config.relay) {
+    if (xv_config.raw_data) {
       Serial.print(inByte, BYTE);  // relay
     }
     decodeData(inByte);
@@ -91,7 +97,6 @@ void loop() {
       pwm_last = pwm_val;
     }
   }
-
 }
 
 void decodeData(unsigned char inByte) {
@@ -104,7 +109,7 @@ void decodeData(unsigned char inByte) {
     break;
 
   case 1: // find 2nd FA
-    if (data_loop_index == 22) {
+    if (data_loop_index == 22) { // Theres 22 bytes in each packet. Time to start over
       if (inByte == 0xFA) {
         data_status = 2;
         data_loop_index = 1;
@@ -119,7 +124,7 @@ void decodeData(unsigned char inByte) {
     break;
 
   case 2: // read data out
-    if (data_loop_index == 22) {
+    if (data_loop_index == 22) { // Theres 22 bytes in each packet. Time to start over
       if (inByte == 0xFA) {
         data_loop_index = 1;
       } 
@@ -139,53 +144,187 @@ void readData(unsigned char inByte) {
   switch (data_loop_index) {
   case 1: // 4 degree index
     data_4deg_index = inByte - 0xA0;
-    //      Serial.print(data_4deg_index, HEX);  
-    //      Serial.print(": ");  
+    if (data_4deg_index == 0) {
+      angle = 0;
+      if (debug_dist) {
+        Serial.print("Timestamp: ");
+        Serial.println(millis());
+      }
+    }
+    //Serial.print(int(data_4deg_index));
+    //Serial.print(" ");
     break;
+    
   case 2: // speed in RPH low byte
     motor_rph_low_byte = inByte;
     break;
+    
   case 3: // speed in RPH high byte
     motor_rph_high_byte = inByte;
     motor_rph = (motor_rph_high_byte << 8) | motor_rph_low_byte;
     motor_rpm = float( (motor_rph_high_byte << 8) | motor_rph_low_byte ) / 64.0;
     if (debug_motor_rpm) {
-      //      Serial.print("Motor RPH HEX: ");
-      //      Serial.print(motor_rph_low_byte, HEX);   
-      //      Serial.println(motor_rph_high_byte, HEX);   
       Serial.print("RPM: ");
       Serial.print(motor_rpm);
       Serial.print("  PWM: ");   
       Serial.println(pwm_val);
     }
     break;
+    
+  case 4:
+    data0 = inByte; // first half of distance data
+    break;
+    
+  case 5:
+    if ((inByte & 0x80) >> 7) {  // check for Invalid Flag
+      dist = 0;
+    } 
+    else {
+      dist =  data0 | (( inByte & 0x3F) << 8);
+    }
+    break;
+    
+  case 6:
+    data2 = inByte; // first half of quality data
+    break;
+    
+  case 7:
+    quality = (inByte << 8) | data2; 
+    if (debug_dist) {
+      if (debug_angle == 360 or debug_angle == angle) {
+        Serial.print(angle);
+        Serial.print(": ");
+        Serial.print(int(dist));
+        Serial.print(" (");
+        Serial.print(quality);
+        Serial.println(")");
+      }
+    }
+    angle++;    
+    break;
+    
+  case 8:
+    data0 = inByte;
+    break;
+    
+  case 9:
+    if ((inByte & 0x80) >> 7) {  // check for Invalid Flag
+      dist = 0;
+    } 
+    else {
+      dist =  data0 | (( inByte & 0x3F) << 8);
+    }
+    break;
+    
+  case 10:
+    data2 = inByte; // first half of quality data
+    break;
+    
+  case 11:
+    quality = (inByte << 8) | data2; 
+    if (debug_dist) {
+      if (debug_angle == 360 or debug_angle == angle) {
+        Serial.print(angle);
+        Serial.print(": ");
+        Serial.print(int(dist));
+        Serial.print(" (");
+        Serial.print(quality);
+        Serial.println(")");
+      }
+    }
+    angle++;    
+    break;
+    
+  case 12:
+    data0 = inByte;
+    break;
+    
+  case 13:
+    if ((inByte & 0x80) >> 7) {  // check for Invalid Flag
+      dist = 0;
+    } 
+    else {
+      dist =  data0 | (( inByte & 0x3F) << 8);
+    }
+    break;
+    
+  case 14:
+    data2 = inByte; // first half of quality data
+    break;
+    
+  case 15:
+    quality = (inByte << 8) | data2; 
+    if (debug_dist) {
+      if (debug_angle == 360 or debug_angle == angle) {
+        Serial.print(angle);
+        Serial.print(": ");
+        Serial.print(int(dist));
+        Serial.print(" (");
+        Serial.print(quality);
+        Serial.println(")");
+      }
+    }
+    angle++;    
+    break;
+    
+  case 16:
+    data0 = inByte;
+    break;
+    
+  case 17:
+    if ((inByte & 0x80) >> 7) {  // check for Invalid Flag
+      dist = 0;
+    } 
+    else {
+      dist =  data0 | (( inByte & 0x3F) << 8);
+    }
+    break;
+    
+  case 18:
+    data2 = inByte; // first half of quality data
+    break;
+    
+  case 19:
+    quality = (inByte << 8) | data2; 
+    if (debug_dist) {
+      if (debug_angle == 360 or debug_angle == angle) {
+        Serial.print(angle);
+        Serial.print(": ");
+        Serial.print(int(dist));
+        Serial.print(" (");
+        Serial.print(quality);
+        Serial.println(")");
+      }
+    }
+    angle++;    
+    break;
+
   default: // others do checksum
     break;
   }  
 }
 
 void initEEPROM() {
-  xv_config.id = 0x02;
+  xv_config.id = 0x03;
   xv_config.motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
 
   xv_config.rpm_setpoint = 300;  // desired RPM
   xv_config.pwm_max = 1023;
-  xv_config.pwm_min = 600;
+  xv_config.pwm_min = 550;
   xv_config.sample_time = 20;
-
   xv_config.Kp = 1.0;
   xv_config.Ki = 0.5;
   xv_config.Kd = 0.00;
 
   xv_config.motor_enable = true;
-  xv_config.relay = true;
+  xv_config.raw_data = true;
   EEPROM_writeAnything(0, xv_config);
 }
 
 void initSerialCommands() {
   sCmd.addCommand("help",       help);
   sCmd.addCommand("Help",       help);
-  sCmd.addCommand("GetConfig",  getConfig);
+  sCmd.addCommand("ShowConfig",  showConfig);
   sCmd.addCommand("SaveConfig", saveConfig);
   sCmd.addCommand("ResetConfig",initEEPROM);
 
@@ -197,24 +336,71 @@ void initSerialCommands() {
 
   sCmd.addCommand("ShowRPM",  showRPM);
   sCmd.addCommand("HideRPM",  hideRPM);
+  sCmd.addCommand("ShowDist",  showDist);
+  sCmd.addCommand("HideDist",  hideDist);
+  sCmd.addCommand("ShowAngle",  showAngle);
   sCmd.addCommand("MotorOff", motorOff);
   sCmd.addCommand("MotorOn",  motorOn);
-  sCmd.addCommand("RelayOff", relayOff);
-  sCmd.addCommand("RelayOn",  relayOn);
-
-  // XV Commands  
-  sCmd.addCommand("GetPrompt",  getPrompt);
-  sCmd.addCommand("GetVersion", getVersion);
+  sCmd.addCommand("HideRaw", hideRaw);
+  sCmd.addCommand("ShowRaw",  showRaw);
 }
 
 void showRPM() {
   debug_motor_rpm = true;
+  if (xv_config.raw_data == true) {
+    hideRaw();
+  }
   Serial.println("Showing RPM data");
 }
 
 void hideRPM() {
   debug_motor_rpm = false;
   Serial.println("Hiding RPM data");
+}
+
+void showDist() {
+  debug_dist = true;
+  if (xv_config.raw_data == true) {
+    hideRaw();
+  }
+  Serial.println("Showing Distance data");
+}
+
+void hideDist() {
+  debug_dist = false;
+  Serial.println("Hiding Distance data");
+}
+
+void showAngle() {
+  showDist(); 
+  double sVal = 0.0;
+  char *arg;
+  boolean syntax_error = false;
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    sVal = atoi(arg);    // Converts a char string to a int
+    if (sVal < 0 or sVal > 360) {
+      syntax_error = true;
+    }
+  }
+  else {
+    syntax_error = true;
+  }
+
+  arg = sCmd.next();
+  if (arg != NULL) {
+    syntax_error = true;
+  }
+
+  if (syntax_error) {
+    Serial.println("Incorrect syntax.  Example: ShowAngle 0 (0 - 359 or 360 for all)"); 
+  }
+  else {
+    Serial.print("Showing Only Angle: ");
+    Serial.println(sVal);
+    debug_angle = sVal;
+  }
 }
 
 void motorOff() {
@@ -229,13 +415,17 @@ void motorOn() {
   Serial.println("Motor on");
 }
 
-void relayOff() {
-  xv_config.relay = false;
-  Serial.println("Lidar data disabled");
+void hideRaw() {
+  xv_config.raw_data = false;
+  Serial.println(" ");
+  Serial.println("Raw lidar data disabled");
+  Serial.println(" ");
 }
 
-void relayOn() {
-  xv_config.relay = true;
+void showRaw() {
+  xv_config.raw_data = true;
+  hideDist();
+  hideRPM();
   Serial.println("Lidar data enabled");
 }
 
@@ -247,6 +437,14 @@ void setRPM() {
   arg = sCmd.next();
   if (arg != NULL) {
     sVal = atof(arg);    // Converts a char string to a float
+    if (sVal < 200) {
+      sVal = 200;
+      Serial.println("Setting to minimum 200");
+    }
+    if (sVal > 300) {
+      sVal = 300;
+      Serial.println("Setting to maximum 300");
+    }
   }
   else {
     syntax_error = true;
@@ -385,33 +583,34 @@ void setSampleTime() {
   }
 }
 
-void getPrompt() {
-  Serial1.print(0x1B, BYTE);
-}
-
-void getVersion() {
-  Serial1.print("GetVersion");
-}
-
 void help() {
+  if (xv_config.raw_data == true) {
+    hideRaw();
+  }
   Serial.println("List of available commands (case sensitive)");
-  Serial.println("  GetConfig");
-  Serial.println("  SaveConfig");
-  Serial.println("  ResetConfig");
-  Serial.println("  SetRPM");
-  Serial.println("  SetKp");
-  Serial.println("  SetKi");
-  Serial.println("  SetKp");
-  Serial.println("  SetSampleTime");
-  Serial.println("  ShowRPM");
-  Serial.println("  HideRPM");
-  Serial.println("  MotorOff");
-  Serial.println("  MotorOn");
-  Serial.println("  RelayOff");
-  Serial.println("  RelayOn");
+  Serial.println("  ShowConfig    - Show the running configuration");
+  Serial.println("  SaveConfig    - Save the running configuration to EEPROM");
+  Serial.println("  ResetConfig   - Restore the original configuration");
+  Serial.println("  SetRPM        - Set the desired rotation speed (min: 200, max: 300)");
+  Serial.println("  SetKp         - Set the proportional gain");
+  Serial.println("  SetKi         - Set the integral gain");
+  Serial.println("  SetKd         - Set the derivative gain");
+  Serial.println("  SetSampleTime - Set the frequency the PID is calculated (ms)");
+  Serial.println("  ShowRPM       - Show the rotation speed");
+  Serial.println("  HideRPM       - Hide the rotation speed");
+  Serial.println("  ShowDist      - Show the distance data");
+  Serial.println("  HideDist      - Hide the distance data");
+  Serial.println("  ShowAngle     - Show distance data for a specific angle (0 - 359 or 360 for all)");
+  Serial.println("  MotorOff      - Stop spinning the lidar");
+  Serial.println("  MotorOn       - Enable spinning of the lidar");
+  Serial.println("  HideRaw       - Stop outputting the raw data from the lidar");
+  Serial.println("  ShowRaw       - Enable the output of the raw lidar data");
 }
 
-void getConfig() {
+void showConfig() {
+  if (xv_config.raw_data == true) {
+    hideRaw();
+  }
   Serial.print("PWM pin: ");
   Serial.println(xv_config.motor_pwm_pin);
 
@@ -435,13 +634,11 @@ void getConfig() {
   Serial.print("Motor Enable: ");
   Serial.println(xv_config.motor_enable);
   Serial.print("Relay: ");
-  Serial.println(xv_config.relay);
+  Serial.println(xv_config.raw_data);
 }
 
 void saveConfig() {
   EEPROM_writeAnything(0, xv_config);
   Serial.println("Config Saved.");
 }
-
-
 

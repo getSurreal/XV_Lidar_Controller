@@ -5,7 +5,7 @@ Control the Neato XV Lidar with an Arduino compatible board
 
 Used as an interface board to connect directly to the Neato XV Lidar and control the rotation speed through Pulse Width Modulation (PWM).
 
-v1.1.1 Copyright 2014 James LeRoy getSurreal.com
+v1.2.0 Copyright 2014 James LeRoy getSurreal.com
 * http://www.getsurreal.com/products/xv-lidar-controller
 * https://github.com/getSurreal/XV_Lidar_Controller
 
@@ -37,18 +37,22 @@ Connect to the Teensy USB port at 115200 baud.  When sending commands use newlin
 
 ##Commands
 Commands are case sensitive.
-* Help
-* GetConfig
-* SaveConfig
-* ResetConfig
-* MotorOff
-* MotorOn
-* RelayOff
-* RelayOn
-* SetRPM
-* SetKp
-* SetKi
-* SetKd
-* SetSampleTime
-* ShowRPM
-* HideRPM
+* Help - Show the list of commands available
+* ShowConfig    - Show the running configuration
+* SaveConfig    - Save the running configuration to EEPROM
+* ResetConfig   - Restore the original configuration
+* SetRPM        - Set the desired rotation speed (min: 200, max: 300)
+* SetKp         - Set the proportional gain
+* SetKi         - Set the integral gain
+* SetKd         - Set the derivative gain
+* SetSampleTime - Set the frequency the PID is calculated (ms)
+* ShowRPM       - Show the rotation speed
+* HideRPM       - Hide the rotation speed
+* ShowDist      - Show the distance data
+* HideDist      - Hide the distance data
+* ShowAngle     - Show distance data for a specific angle (0 - 359 or 360 for all)
+* MotorOff      - Stop spinning the lidar
+* MotorOn       - Enable spinning of the lidar
+* HideRaw       - Stop outputting the raw data from the lidar
+* ShowRaw       - Enable the output of the raw lidar data
+
