@@ -61,7 +61,14 @@ uint16_t angle;
 
 SerialCommand sCmd;
 
-const int ledPin = 11;
+
+  #if defined(__AVR_ATmega32U4__) && defined(CORE_TEENSY)  // if Teensy 2.0
+  const int ledPin = 11;
+  #endif
+  
+  #if defined(__MK20DX256__)  // if Teensy 3.1
+  const int ledPin = 13;
+  #endif
 boolean ledState = LOW;
 
 void setup() {
@@ -71,7 +78,13 @@ void setup() {
   }
   pinMode(xv_config.motor_pwm_pin, OUTPUT); 
   Serial.begin(115200);  // USB serial
+  #if defined(__AVR_ATmega32U4__) && defined(CORE_TEENSY) // if Teensy 2.0
   Serial1.begin(115200);  // XV LDS data 
+  #endif
+  
+  #if defined(__MK20DX256__) // if Teensy 3.1
+  Serial1.begin(115200);  // XV LDS data 
+  #endif
 
   Timer3.initialize(30); // set PWM frequency to 32.768kHz  
 
