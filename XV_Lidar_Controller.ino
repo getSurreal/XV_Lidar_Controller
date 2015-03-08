@@ -1,5 +1,5 @@
 /*
-  XV Lidar Controller v1.2.1
+  XV Lidar Controller v1.2.2
  
  Copyright 2014 James LeRoy getSurreal
  https://github.com/getSurreal/XV_Lidar_Controller
@@ -19,11 +19,13 @@
 struct EEPROM_Config {
   byte id;
   char version[6];
-  int motor_pwm_pin;  // pin connected to mosfet for motor speed control
+  int motor_pwm_pin;    // pin connected to mosfet for motor speed control
   double rpm_setpoint;  // desired RPM (uses double to be compatible with PID library)
-  double pwm_max;  // max analog value.  probably never needs to change from 1023
-  double pwm_min;  // min analog pulse value to spin the motor
-  int sample_time;  // how often to calculate the PID values
+  double rpm_min;
+  double rpm_max;
+  double pwm_max;       // max analog value.  probably never needs to change from 1023
+  double pwm_min;       // min analog pulse value to spin the motor
+  int sample_time;      // how often to calculate the PID values
 
   // PID tuning values
   double Kp;
@@ -38,11 +40,16 @@ struct EEPROM_Config {
 } 
 xv_config;
 
-const byte EEPROM_ID = 0x04;  // used to validate EEPROM initialized
+const byte EEPROM_ID = 0x05;  // used to validate EEPROM initialized
 
-double pwm_val;
+double pwm_val = 500;  // start with ~50% power
 double pwm_last;
 double motor_rpm;
+unsigned long now;
+unsigned long motor_check_timer = millis();
+unsigned long motor_check_interval = 200;  
+unsigned int rpm_err_thresh = 10;  // 2 seconds (10 * 200ms) to shutdown motor with improper RPM and high voltage
+unsigned int rpm_err = 0;
 unsigned long curMillis;
 unsigned long lastMillis = millis();
 
@@ -116,6 +123,7 @@ void loop() {
       Timer3.pwm(xv_config.motor_pwm_pin, pwm_val);  // replacement for analogWrite()
       pwm_last = pwm_val;
     }
+    motorCheck();
   }
 }
 
@@ -164,8 +172,8 @@ void readData(unsigned char inByte) {
   switch (data_loop_index) {
   case 1: // 4 degree index
     data_4deg_index = inByte - 0xA0;
-    if (data_4deg_index == 0) {
-      angle = 0;
+    angle = data_4deg_index * 4;  // 1st angle in the set of 4
+    if (angle == 0) {
       if (ledState) {
         ledState = LOW;
       } 
@@ -192,7 +200,7 @@ void readData(unsigned char inByte) {
     motor_rph_high_byte = inByte;
     motor_rph = (motor_rph_high_byte << 8) | motor_rph_low_byte;
     motor_rpm = float( (motor_rph_high_byte << 8) | motor_rph_low_byte ) / 64.0;
-    if (xv_config.show_rpm) {
+    if (xv_config.show_rpm and angle == 0) {
       Serial.print(F("RPM: "));
       Serial.print(motor_rpm);
       Serial.print(F("  PWM: "));   
@@ -228,11 +236,11 @@ void readData(unsigned char inByte) {
         Serial.print(quality);
         Serial.println(F(")"));
       }
-    }
-    angle++;    
+    }   
     break;
 
   case 8:
+    angle = data_4deg_index * 4 + 1; // 2nd angle in the set
     data0 = inByte;
     break;
 
@@ -261,10 +269,10 @@ void readData(unsigned char inByte) {
         Serial.println(F(")"));
       }
     }
-    angle++;    
     break;
 
   case 12:
+    angle = data_4deg_index * 4 + 2; // 3rd angle in the set
     data0 = inByte;
     break;
 
@@ -293,10 +301,10 @@ void readData(unsigned char inByte) {
         Serial.println(F(")"));
       }
     }
-    angle++;    
     break;
 
   case 16:
+    angle = data_4deg_index * 4 + 3;  // 4th angle in the set
     data0 = inByte;
     break;
 
@@ -325,7 +333,6 @@ void readData(unsigned char inByte) {
         Serial.println(F(")"));
       }
     }
-    angle++;    
     break;
 
   default: // others do checksum
@@ -334,17 +341,19 @@ void readData(unsigned char inByte) {
 }
 
 void initEEPROM() {
-  xv_config.id = 0x04;
-  strcpy(xv_config.version, "1.2.1");
+  xv_config.id = 0x05;
+  strcpy(xv_config.version, "1.2.2");
   xv_config.motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
 
   xv_config.rpm_setpoint = 300;  // desired RPM
+  xv_config.rpm_min = 200;
+  xv_config.rpm_max = 300;
+  xv_config.pwm_min = 100;
   xv_config.pwm_max = 1023;
-  xv_config.pwm_min = 550;
   xv_config.sample_time = 20;
-  xv_config.Kp = 1.0;
-  xv_config.Ki = 0.5;
-  xv_config.Kd = 0.00;
+  xv_config.Kp = 2.0;
+  xv_config.Ki = 1.0;
+  xv_config.Kd = 0.0;
 
   xv_config.motor_enable = true;
   xv_config.raw_data = true;
@@ -459,10 +468,29 @@ void motorOff() {
 
 void motorOn() {
   xv_config.motor_enable = true;
-  Timer3.pwm(xv_config.motor_pwm_pin, xv_config.pwm_min);
+  Timer3.pwm(xv_config.motor_pwm_pin, pwm_val);
+  rpm_err = 0;  // reset rpm error
   Serial.println(F(" "));
   Serial.print(F("Motor on"));
   Serial.println(F(" "));
+}
+
+void motorCheck() {  // Make sure the motor RPMs are good else shut it down
+  now = millis();
+  if (now - motor_check_timer > motor_check_interval){
+    if ((motor_rpm < xv_config.rpm_min or motor_rpm > xv_config.rpm_max) and pwm_val > 1000) {
+      rpm_err++;
+    }
+    else {
+      rpm_err = 0;
+    }
+    if (rpm_err > rpm_err_thresh) {
+      motorOff(); 
+      ledState = LOW;
+      digitalWrite(ledPin, ledState);
+    }
+    motor_check_timer = millis();
+  }
 }
 
 void hideRaw() {
@@ -489,16 +517,18 @@ void setRPM() {
   arg = sCmd.next();
   if (arg != NULL) {
     sVal = atof(arg);    // Converts a char string to a float
-    if (sVal < 200) {
-      sVal = 200;
+    if (sVal < xv_config.rpm_min) {
+      sVal = xv_config.rpm_min;
       Serial.println(F(" "));
-      Serial.print(F("Setting to minimum 200"));
+      Serial.print(F("RPM too low. Setting to minimum "));
+      Serial.print(xv_config.rpm_min);
       Serial.println(F(" "));
     }
-    if (sVal > 300) {
-      sVal = 300;
+    if (sVal > xv_config.rpm_max) {
+      sVal = xv_config.rpm_max;
       Serial.println(F(" "));
-      Serial.print(F("Setting to maximum 300"));
+      Serial.print(F("RPM too high. Setting to maximum "));
+      Serial.print(xv_config.rpm_max);
       Serial.println(F(" "));
     }
   }
@@ -517,6 +547,7 @@ void setRPM() {
     Serial.println(F(" "));
   }
   else {
+    xv_config.rpm_setpoint = sVal;
     Serial.println(F(" "));
     Serial.print(F("New RPM setpoint: "));
     Serial.println(sVal);
@@ -749,5 +780,6 @@ void saveConfig() {
   EEPROM_writeAnything(0, xv_config);
   Serial.print(F("Config Saved."));
 }
+
 
 
