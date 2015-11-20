@@ -1,6 +1,10 @@
 /*
   XV Lidar Controller v1.2.2
+<<<<<<< HEAD
 
+=======
+ 
+>>>>>>> 9423c3c07ba8665de06a1a0f3cdad7d726b30174
  Copyright 2014 James LeRoy getSurreal
  https://github.com/getSurreal/XV_Lidar_Controller
  http://www.getsurreal.com/products/xv-lidar-controller
@@ -53,6 +57,7 @@ struct EEPROM_Config {
 }
 xv_config;
 
+<<<<<<< HEAD
 /*
  * EEPROM_ID
  * Used to validate that the EEPROM is initialized
@@ -60,13 +65,20 @@ xv_config;
  *   or when the default values are changed
  */
 const byte EEPROM_ID = 0x05;
+=======
+const byte EEPROM_ID = 0x05;  // used to validate EEPROM initialized
+>>>>>>> 9423c3c07ba8665de06a1a0f3cdad7d726b30174
 
 double pwm_val = 500;  // start with ~50% power
 double pwm_last;
 double motor_rpm;
 unsigned long now;
 unsigned long motor_check_timer = millis();
+<<<<<<< HEAD
 unsigned long motor_check_interval = 200;
+=======
+unsigned long motor_check_interval = 200;  
+>>>>>>> 9423c3c07ba8665de06a1a0f3cdad7d726b30174
 unsigned int rpm_err_thresh = 10;  // 2 seconds (10 * 200ms) to shutdown motor with improper RPM and high voltage
 unsigned int rpm_err = 0;
 unsigned long curMillis;
@@ -232,6 +244,7 @@ void loop() {
     }
     motorCheck();
 <<<<<<< HEAD
+<<<<<<< HEAD
   }  // if (xv_config.motor_enable)
 }  // loop
 /*
@@ -256,6 +269,8 @@ uint16_t processIndex(boolean bValidData) {
     uint16_t data_4deg_index = Packet[OFFSET_TO_INDEX] - INDEX_LO;
     angle = data_4deg_index * N_DATA_QUADS;     // 1st angle in the set of 4
 =======
+=======
+>>>>>>> 9423c3c07ba8665de06a1a0f3cdad7d726b30174
   }
 }
 
@@ -305,6 +320,9 @@ void readData(unsigned char inByte) {
   case 1: // 4 degree index
     data_4deg_index = inByte - 0xA0;
     angle = data_4deg_index * 4;  // 1st angle in the set of 4
+<<<<<<< HEAD
+>>>>>>> 9423c3c07ba8665de06a1a0f3cdad7d726b30174
+=======
 >>>>>>> 9423c3c07ba8665de06a1a0f3cdad7d726b30174
     if (angle == 0) {
       if (ledState) {
@@ -595,7 +613,11 @@ byte eValidatePacket() {
 void initEEPROM() {
   xv_config.id = 0x05;
   strcpy(xv_config.version, "1.2.2");
+<<<<<<< HEAD
   xv_config.motor_pwm_pin = 9;   // pin connected N-Channel Mosfet  (only pin controlled with Timer3)
+=======
+  xv_config.motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
+>>>>>>> 9423c3c07ba8665de06a1a0f3cdad7d726b30174
 
   xv_config.rpm_setpoint = 300;  // desired RPM
   xv_config.rpm_min = 200;
@@ -779,7 +801,11 @@ void motorOn() {
 
 void motorCheck() {  // Make sure the motor RPMs are good else shut it down
   now = millis();
+<<<<<<< HEAD
   if (now - motor_check_timer > motor_check_interval) {
+=======
+  if (now - motor_check_timer > motor_check_interval){
+>>>>>>> 9423c3c07ba8665de06a1a0f3cdad7d726b30174
     if ((motor_rpm < xv_config.rpm_min or motor_rpm > xv_config.rpm_max) and pwm_val > 1000) {
       rpm_err++;
     }
@@ -787,7 +813,11 @@ void motorCheck() {  // Make sure the motor RPMs are good else shut it down
       rpm_err = 0;
     }
     if (rpm_err > rpm_err_thresh) {
+<<<<<<< HEAD
       motorOff();
+=======
+      motorOff(); 
+>>>>>>> 9423c3c07ba8665de06a1a0f3cdad7d726b30174
       ledState = LOW;
       digitalWrite(ledPin, ledState);
     }
