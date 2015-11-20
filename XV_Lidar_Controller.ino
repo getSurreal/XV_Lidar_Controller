@@ -5,8 +5,6 @@
  https://github.com/getSurreal/XV_Lidar_Controller
  http://www.getsurreal.com/products/xv-lidar-controller
  
- Modified to add CRC checking - Doug Hilton, WD0UG November, 2015 mailto: six.speed (at) yahoo (dot) com
- 
  See README for additional information 
  
  The F() macro in the Serial statements tells the compiler to keep your strings in PROGMEM
@@ -17,8 +15,6 @@
 #include <EEPROM.h>
 #include "EEPROMAnything.h"
 #include <SerialCommand.h>
-
-const int SHOW_ALL_ANGLES = 360;                                // value means 'display all angle data, 0..359'
 
 struct EEPROM_Config {
   byte id;
@@ -57,61 +53,47 @@ unsigned int rpm_err = 0;
 unsigned long curMillis;
 unsigned long lastMillis = millis();
 
-// Added by DSH
-const unsigned char COMMAND = 0xFA;        // Start of new packet
-const int INDEX_LO = 0xA0;                 // lowest index value
-const int INDEX_HI = 0xF9;                 // highest index value
-const int PACKET_LENGTH = 22;              // length of a complete packet
-int Packet[PACKET_LENGTH];                 // an input packet
-int ixPacket = 0;                          // index into 'Packet' array
-const int N_DATA_QUADS = 4;                // there are 4 groups of data elements
-const int N_ELEMENTS_PER_QUAD = 4;         // viz., 0=distance LSB; 1=distance MSB; 2=sig LSB; 3=sig MSB
-// Offsets to bytes within 'Packet'
-const int OFFSET_TO_INDEX = 1;
-const int OFFSET_TO_SPEED_LSB = OFFSET_TO_INDEX + 1;
-const int OFFSET_TO_SPEED_MSB = OFFSET_TO_SPEED_LSB + 1;
-const int OFFSET_TO_4_DATA_READINGS = OFFSET_TO_SPEED_MSB + 1;
-const int OFFSET_TO_CRC_L = PACKET_LENGTH - 2;
-const int OFFSET_TO_CRC_M = PACKET_LENGTH - 1;
-// Offsets to the (4) elements of each of the (4) data quads
-const int OFFSET_DATA_DISTANCE_LSB = 0;
-const int OFFSET_DATA_DISTANCE_MSB = OFFSET_DATA_DISTANCE_LSB + 1;
-const int OFFSET_DATA_SIGNAL_LSB = OFFSET_DATA_DISTANCE_MSB + 1;
-const int OFFSET_DATA_SIGNAL_MSB = OFFSET_DATA_SIGNAL_LSB + 1;
-
-const byte eState_Find_COMMAND = 0;                        // 1st state: find 0xFA (COMMAND) in input stream
-const byte eState_Build_Packet = eState_Find_COMMAND + 1;  // 2nd state: build the packet
-int eState = eState_Find_COMMAND;
 PID rpmPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint, xv_config.Kp, xv_config.Ki, xv_config.Kd, DIRECT);
 
 uint8_t inByte = 0;  // incoming serial byte
-//uint16_t data_status = 0;
-//uint16_t data_4deg_index = 0;
-//uint16_t data_loop_index = 0;
+uint16_t data_status = 0;
+uint16_t data_4deg_index = 0;
+uint16_t data_loop_index = 0;
 uint8_t motor_rph_high_byte = 0; 
 uint8_t motor_rph_low_byte = 0;
-//uint8_t data0, data2;
-uint16_t dist[N_DATA_QUADS] = {0,0,0,0};      // thre are (4) distances, one for each data quad
-uint16_t quality[N_DATA_QUADS] = {0,0,0,0};   // same with 'quality'
+uint8_t data0, data2;
+uint16_t dist, quality;
 uint16_t motor_rph = 0;
-uint16_t startingAngle = 0;                   // the first scan angle (of group of 4, based on 'index'), in degrees (0..359)
+uint16_t angle;
 
 SerialCommand sCmd;
 
-const int ledPin = 11;
+
+  #if defined(__AVR_ATmega32U4__) && defined(CORE_TEENSY)  // if Teensy 2.0
+  const int ledPin = 11;
+  #endif
+  
+  #if defined(__MK20DX256__)  // if Teensy 3.1
+  const int ledPin = 13;
+  #endif
 boolean ledState = LOW;
 
-// initialization (before 'loop')
 void setup() {
   EEPROM_readAnything(0, xv_config);
   if( xv_config.id != EEPROM_ID) { // verify EEPROM values have been initialized
     initEEPROM();
   }
   pinMode(xv_config.motor_pwm_pin, OUTPUT); 
-  Serial.begin(115200);                            // USB serial
-  Serial1.begin(115200);                           // XV LDS data 
+  Serial.begin(115200);  // USB serial
+  #if defined(__AVR_ATmega32U4__) && defined(CORE_TEENSY) // if Teensy 2.0
+  Serial1.begin(115200);  // XV LDS data 
+  #endif
+  
+  #if defined(__MK20DX256__) // if Teensy 3.1
+  Serial1.begin(115200);  // XV LDS data 
+  #endif
 
-  Timer3.initialize(30);                           // set PWM frequency to 32.768kHz  
+  Timer3.initialize(30); // set PWM frequency to 32.768kHz  
 
   rpmPID.SetOutputLimits(xv_config.pwm_min,xv_config.pwm_max);
   rpmPID.SetSampleTime(xv_config.sample_time);
@@ -120,70 +102,21 @@ void setup() {
 
   initSerialCommands();
   pinMode(ledPin, OUTPUT);
-  
-  eState = eState_Find_COMMAND;
-  for (ixPacket = 0; ixPacket < PACKET_LENGTH; ixPacket++)  // Initialize
-    Packet[ixPacket] = 0;
-  ixPacket = 0;      
 }
-// Main loop (forever)
+
 void loop() {
-  boolean bPacketOkay;                            // true = packet is okay (CRC valid)  
+
   sCmd.readSerial();  // check for incoming serial commands
-  if (Serial1.available() > 0) {                  // read byte from LIDAR and relay to USB    
-    inByte = Serial1.read();                      // get incoming byte:
-    if (xv_config.raw_data)
-      Serial.print(inByte, BYTE);                 // relay
-    // Switch, based on 'eState':
-    // State 1: We're scanning for 0xFA (COMMAND) in the input stream
-    // State 2: Build a complete data packet
-    if (eState == eState_Find_COMMAND) {          // flush input until we get COMMAND byte
-      if(inByte == COMMAND) {
-        eState++;                                 // switch to 'build a packet' state
-        Packet[ixPacket++] = inByte;              // store 1st byte of data into 'Packet'
-      }
+
+  // read byte from LIDAR and relay to USB
+  if (Serial1.available() > 0) {
+    inByte = Serial1.read();  // get incoming byte:
+    if (xv_config.raw_data) {
+      Serial.print(inByte, BYTE);  // relay
     }
-    else {                                        // eState == eState_Build_Packet
-      Packet[ixPacket++] = inByte;                // keep storing input into 'Packet'
-      if (ixPacket == PACKET_LENGTH) {            // we've got all the input bytes, so we're done building this packet
-        bPacketOkay = (eValidatePacket() == 0);   // Check packet CRC
-        startingAngle = processIndex(bPacketOkay);   // get the starting angle of this group (of 4)
-        processSpeed(bPacketOkay);                // process the speed
-        // process each of the (4) sets of data in the packet
-        for (int ix = 0; ix < N_DATA_QUADS; ix++) // process the distance
-          processDistance(bPacketOkay, ix);
-        for (int ix = 0; ix < N_DATA_QUADS; ix++) // process the signal strength (quality)
-          processSignalStrength(bPacketOkay, ix);
-        if (bPacketOkay) {
-          if (xv_config.show_dist) {              // show distance command is active
-            if (xv_config.show_angle == SHOW_ALL_ANGLES 
-            || (xv_config.show_angle >= startingAngle && xv_config.show_angle < startingAngle + N_DATA_QUADS)) {
-              for (int ix = 0; ix < N_DATA_QUADS; ix++) {
-                if ((xv_config.show_angle == SHOW_ALL_ANGLES) 
-                || (xv_config.show_angle == startingAngle + ix)) {                  
-                  Serial.print(startingAngle + ix);
-                  Serial.print(F(": "));
-                  Serial.print(int(dist[ix]));
-                  Serial.print(F(" ("));
-                  Serial.print(quality[ix]);
-                  Serial.println(F(")"));
-                }
-              }  // or (int ix = 0; ix < N_DATA_QUADS; ix++)
-            }  // if (xv_config.show_angle == SHOW_ALL_ANGLES ...
-          }  // if (xv_config.show_dist)
-        }  // if (bPacketOkay)
-        // initialize a bunch of stuff before we switch back to State 1
-        for (int ix = 0; ix < N_DATA_QUADS; ix++) {
-          dist[ix] = 0;
-          quality[ix] = 0;
-        }
-        for (ixPacket = 0; ixPacket < PACKET_LENGTH; ixPacket++)  // clear out this packet
-          Packet[ixPacket] = 0;
-        ixPacket = 0;      
-        eState = eState_Find_COMMAND;                // This packet is done -- look for next COMMAND byte        
-      }  // if (ixPacket == PACKET_LENGTH)
-    }  // if (eState == eState_Find_COMMAND)
-  }  // if (Serial1.available() > 0)
+    decodeData(inByte);
+  }
+
   if (xv_config.motor_enable) {  
     rpmPID.Compute();
     if (pwm_val != pwm_last) {
@@ -191,29 +124,55 @@ void loop() {
       pwm_last = pwm_val;
     }
     motorCheck();
-  }  // if (xv_config.motor_enable)
-}  // loop
-/*
- * processIndex - Process the packet element 'index'
- * index is the index byte in the 90 packets, going from A0 (packet 0, readings 0 to 3) to F9 
- *    (packet 89, readings 356 to 359).
- * Enter with: bValidData = true if packet is okay (good CRC)
- * Uses:       Packet
- *             ledState gets toggled if angle = 0
- *             ledPin = which pin the LED is connected to
- *             ledState = LED on or off
- *             xv_config.show_dist = true if we're supposed to show distance
- *             curMillis = milliseconds, now
- *             lastMillis = milliseconds, last time through this subroutine
- * Calls:      digitalWrite() - used to toggle LED pin
- *             Serial.print
- * Returns:    The first angle (of 4) in the current 'index' group
- */
-uint16_t processIndex(boolean bValidData) {
-  uint16_t angle = 0;
-  if (bValidData) {
-    uint16_t data_4deg_index = Packet[OFFSET_TO_INDEX] - INDEX_LO;
-    angle = data_4deg_index * N_DATA_QUADS;     // 1st angle in the set of 4  
+  }
+}
+
+void decodeData(unsigned char inByte) {
+  switch (data_status) {
+  case 0: // no header
+    if (inByte == 0xFA) {
+      data_status = 1;
+      data_loop_index = 1;
+    }
+    break;
+
+  case 1: // find 2nd FA
+    if (data_loop_index == 22) { // Theres 22 bytes in each packet. Time to start over
+      if (inByte == 0xFA) {
+        data_status = 2;
+        data_loop_index = 1;
+      } 
+      else { // if not FA search again
+        data_status = 0;
+      }
+    }
+    else {
+      data_loop_index++;
+    }
+    break;
+
+  case 2: // read data out
+    if (data_loop_index == 22) { // Theres 22 bytes in each packet. Time to start over
+      if (inByte == 0xFA) {
+        data_loop_index = 1;
+      } 
+      else { // if not FA search again
+        data_status = 0;
+      }
+    }
+    else {
+      readData(inByte);
+      data_loop_index++;
+    }
+    break;
+  }
+
+}
+void readData(unsigned char inByte) {
+  switch (data_loop_index) {
+  case 1: // 4 degree index
+    data_4deg_index = inByte - 0xA0;
+    angle = data_4deg_index * 4;  // 1st angle in the set of 4
     if (angle == 0) {
       if (ledState) {
         ledState = LOW;
@@ -224,132 +183,163 @@ uint16_t processIndex(boolean bValidData) {
       digitalWrite(ledPin, ledState);
       if (xv_config.show_dist) {
         curMillis = millis();
-        if(xv_config.show_angle == SHOW_ALL_ANGLES) {
-          /*
-          Serial.print(F("Time Interval: "));
-          Serial.println(curMillis - lastMillis);
-          */
-        }
+        Serial.print(F("Time Interval: "));
+        Serial.println(curMillis - lastMillis);
         lastMillis = curMillis;
       }
-    } // if (angle == 0)
-  }  // if (bValidData)
-  return angle;
-}
-/*
- * processSpeed- Process the packet element 'speed'
- * speed is two-bytes of information, little-endian. It represents the speed, in 64th of RPM (aka value 
- *    in RPM represented in fixed point, with 6 bits used for the decimal part).
- * Enter with: bValidData = true if packet is okay (good CRC)
- * Uses:       Packet
- *             angle = if 0 then enable display of RPM and PWM
- *             xv_config.show_rpm = true if we're supposed to display RPM and PWM
- * Calls:      Serial.print
- */
-void processSpeed(boolean bValidData) {
-  if (bValidData) {
-    motor_rph_low_byte = Packet[OFFSET_TO_SPEED_LSB];
-    motor_rph_high_byte = Packet[OFFSET_TO_SPEED_MSB];
+    }
+    //Serial.print(int(data_4deg_index));
+    //Serial.println(F(" "));
+    break;
+
+  case 2: // speed in RPH low byte
+    motor_rph_low_byte = inByte;
+    break;
+
+  case 3: // speed in RPH high byte
+    motor_rph_high_byte = inByte;
     motor_rph = (motor_rph_high_byte << 8) | motor_rph_low_byte;
     motor_rpm = float( (motor_rph_high_byte << 8) | motor_rph_low_byte ) / 64.0;
-    if (xv_config.show_rpm and startingAngle == 0) {
+    if (xv_config.show_rpm and angle == 0) {
       Serial.print(F("RPM: "));
       Serial.print(motor_rpm);
       Serial.print(F("  PWM: "));   
       Serial.println(pwm_val);
     }
-  }  // if (bValidData)
+    break;
+
+  case 4:
+    data0 = inByte; // first half of distance data
+    break;
+
+  case 5:
+    if ((inByte & 0x80) >> 7) {  // check for Invalid Flag
+      dist = 0;
+    } 
+    else {
+      dist =  data0 | (( inByte & 0x3F) << 8);
+    }
+    break;
+
+  case 6:
+    data2 = inByte; // first half of quality data
+    break;
+
+  case 7:
+    quality = (inByte << 8) | data2; 
+    if (xv_config.show_dist) {
+      if (xv_config.show_angle == 360 or xv_config.show_angle == angle) {
+        Serial.print(angle);
+        Serial.print(F(": "));
+        Serial.print(int(dist));
+        Serial.print(F(" ("));
+        Serial.print(quality);
+        Serial.println(F(")"));
+      }
+    }   
+    break;
+
+  case 8:
+    angle = data_4deg_index * 4 + 1; // 2nd angle in the set
+    data0 = inByte;
+    break;
+
+  case 9:
+    if ((inByte & 0x80) >> 7) {  // check for Invalid Flag
+      dist = 0;
+    } 
+    else {
+      dist =  data0 | (( inByte & 0x3F) << 8);
+    }
+    break;
+
+  case 10:
+    data2 = inByte; // first half of quality data
+    break;
+
+  case 11:
+    quality = (inByte << 8) | data2; 
+    if (xv_config.show_dist) {
+      if (xv_config.show_angle == 360 or xv_config.show_angle == angle) {
+        Serial.print(angle);
+        Serial.print(F(": "));
+        Serial.print(int(dist));
+        Serial.print(F(" ("));
+        Serial.print(quality);
+        Serial.println(F(")"));
+      }
+    }
+    break;
+
+  case 12:
+    angle = data_4deg_index * 4 + 2; // 3rd angle in the set
+    data0 = inByte;
+    break;
+
+  case 13:
+    if ((inByte & 0x80) >> 7) {  // check for Invalid Flag
+      dist = 0;
+    } 
+    else {
+      dist =  data0 | (( inByte & 0x3F) << 8);
+    }
+    break;
+
+  case 14:
+    data2 = inByte; // first half of quality data
+    break;
+
+  case 15:
+    quality = (inByte << 8) | data2; 
+    if (xv_config.show_dist) {
+      if (xv_config.show_angle == 360 or xv_config.show_angle == angle) {
+        Serial.print(angle);
+        Serial.print(F(": "));
+        Serial.print(int(dist));
+        Serial.print(F(" ("));
+        Serial.print(quality);
+        Serial.println(F(")"));
+      }
+    }
+    break;
+
+  case 16:
+    angle = data_4deg_index * 4 + 3;  // 4th angle in the set
+    data0 = inByte;
+    break;
+
+  case 17:
+    if ((inByte & 0x80) >> 7) {  // check for Invalid Flag
+      dist = 0;
+    } 
+    else {
+      dist =  data0 | (( inByte & 0x3F) << 8);
+    }
+    break;
+
+  case 18:
+    data2 = inByte; // first half of quality data
+    break;
+
+  case 19:
+    quality = (inByte << 8) | data2; 
+    if (xv_config.show_dist) {
+      if (xv_config.show_angle == 360 or xv_config.show_angle == angle) {
+        Serial.print(angle);
+        Serial.print(F(": "));
+        Serial.print(int(dist));
+        Serial.print(F(" ("));
+        Serial.print(quality);
+        Serial.println(F(")"));
+      }
+    }
+    break;
+
+  default: // others do checksum
+    break;
+  }  
 }
-/*
- * Data 0 to Data 3 are the 4 readings. Each one is 4 bytes long, and organized as follows :
- *   byte 0 : <distance 7:0>
- *   byte 1 : <"invalid data" flag> <"strength warning" flag> <distance 13:8>
- *   byte 2 : <signal strength 7:0>
- *   byte 3 : <signal strength 15:8>
- */
-/*
- * processDistance- Process the packet element 'distance'
- * Enter with: bValidData = true if packet is okay (good CRC)
- *             iQuad = which one of the (4) readings to process, value = 0..3
- * Uses:       Packet
- *             dist[] = distance to object
- * Calls:      N/A
- */
-void processDistance(boolean bValidData, int iQuad) {
-  uint8_t dataL, dataM;
-  dist[iQuad] = 0;                       // initialize
-  if (bValidData) {
-    int iOffset = (iQuad * N_DATA_QUADS) + OFFSET_TO_4_DATA_READINGS + OFFSET_DATA_DISTANCE_LSB;    
-    // byte 0 : <distance 7:0>
-    // byte 1 : <"invalid data" flag> <"strength warning" flag> <distance 13:8>
-    dataL = Packet[iOffset];             // first half of distance data
-    dataM = Packet[iOffset + 1];         // get MSB of distance data + flags
-    if ((dataM & 0x80) == 0)             // check for Invalid Flag
-      dist[iQuad] = dataL | ((dataM & 0x3F) << 8);
-  }  // if (bValidData)
-}
-/*
- * processSignalStrength- Process the packet element 'signal strength'
- * Enter with: bValidData = true if packet is okay (good CRC)
- *             iQuad = which one of the (4) readings to process, value = 0..3
- * Uses:       Packet
- *             quality[] = signal quality
- * Calls:      N/A
- */
-void processSignalStrength(boolean bValidData, int iQuad) {
-  uint8_t dataL, dataM;
-  quality[iQuad] = 0;                        // initialize
-  if (bValidData) {
-    int iOffset = (iQuad * N_DATA_QUADS) + OFFSET_TO_4_DATA_READINGS + OFFSET_DATA_SIGNAL_LSB;    
-    dataL = Packet[iOffset];                  // signal strength LSB  
-    dataM = Packet[iOffset + 1];
-    quality[iQuad] = dataL | (dataM << 8);
-  }  // if (bValidData)
-}
 
-/*
- * eValidatePacket - Validate 'Packet'
- * Enter with: 'Packet' is ready to check
- * Uses:       CalcCRC
- * Exits with: 0 = Packet is okay
- * Error:      non-zero = Packet is no good
- */
-byte eValidatePacket() {
-  unsigned long chk32;
-  unsigned long checksum;
-  const int bytesToCheck = PACKET_LENGTH - 2;
-  const int CalcCRC_Len = bytesToCheck / 2;
-  unsigned int CalcCRC[CalcCRC_Len];
-
-  byte b1a, b1b, b2a, b2b;
-  int ix;
-
-  for (int ix = 0; ix < CalcCRC_Len; ix++)       // initialize 'CalcCRC' array
-    CalcCRC[ix] = 0;
-    
-  // Perform checksum validity test
-  for (ix = 0; ix < bytesToCheck; ix += 2)      // build 'CalcCRC' array
-    CalcCRC[ix / 2] = Packet[ix] + ((Packet[ix + 1]) << 8);          
-
-  chk32 = 0;
-  for (ix = 0; ix < CalcCRC_Len; ix++) 
-    chk32 = (chk32 << 1) + CalcCRC[ix];            
-  checksum = (chk32 & 0x7FFF) + (chk32 >> 15);
-  checksum &= 0x7FFF;
-  
-  b1a = checksum & 0xFF;
-  b1b = Packet[OFFSET_TO_CRC_L];
-  b2a = checksum >> 8;
-  b2b = Packet[OFFSET_TO_CRC_M];
-  if ((b1a == b1b) && (b2a == b2b)) 
-    return 0;                                  // okay
-  else
-    return 1;                                  // non-zero = bad CRC
-}
-
-/*
- * initEEPROM
- */
 void initEEPROM() {
   xv_config.id = 0x05;
   strcpy(xv_config.version, "1.2.2");
@@ -369,13 +359,11 @@ void initEEPROM() {
   xv_config.raw_data = true;
   xv_config.show_dist = false;
   xv_config.show_rpm = false;
-  xv_config.show_angle = SHOW_ALL_ANGLES;
+  xv_config.show_angle = 360;
 
   EEPROM_writeAnything(0, xv_config);
 }
-/*
- * initSerialCommands
- */
+
 void initSerialCommands() {
   sCmd.addCommand("help",       help);
   sCmd.addCommand("Help",       help);
@@ -394,15 +382,12 @@ void initSerialCommands() {
   sCmd.addCommand("ShowDist",  showDist);
   sCmd.addCommand("HideDist",  hideDist);
   sCmd.addCommand("ShowAngle",  showAngle);
-  sCmd.addCommand("HideAngle",  hideDist);
   sCmd.addCommand("MotorOff", motorOff);
   sCmd.addCommand("MotorOn",  motorOn);
   sCmd.addCommand("HideRaw", hideRaw);
   sCmd.addCommand("ShowRaw",  showRaw);
 }
-/*
- * showRPM
- */
+
 void showRPM() {
   xv_config.show_rpm = true;
   if (xv_config.raw_data == true) {
@@ -412,9 +397,7 @@ void showRPM() {
   Serial.print(F("Showing RPM data"));
   Serial.println(F(" "));
 }
-/*
- * hideRPM
- */
+
 void hideRPM() {
   xv_config.show_rpm = false;
   Serial.println(F(" "));
@@ -428,13 +411,12 @@ void showDist() {
     hideRaw();
   }
   Serial.println(F(" "));
-  Serial.print(F("Showing Distance data <Angle>: <dist.mm> (quality)}"));
+  Serial.print(F("Showing Distance data"));
   Serial.println(F(" "));
 }
 
 void hideDist() {
   xv_config.show_dist = false;
-  xv_config.show_angle = SHOW_ALL_ANGLES;              // set default back to 'show all angles'
   Serial.println(F(" "));
   Serial.print(F("Hiding Distance data"));
   Serial.println(F(" "));
@@ -449,7 +431,7 @@ void showAngle() {
   arg = sCmd.next();
   if (arg != NULL) {
     sVal = atoi(arg);    // Converts a char string to a int
-    if (sVal < 0 or sVal > SHOW_ALL_ANGLES) {
+    if (sVal < 0 or sVal > 360) {
       syntax_error = true;
     }
   }
@@ -565,12 +547,12 @@ void setRPM() {
     Serial.println(F(" "));
   }
   else {
-    Serial.print(F("Old RPM setpoint:"));
-    Serial.println(xv_config.rpm_setpoint);
     xv_config.rpm_setpoint = sVal;
-    //Serial.println(F(" "));
+    Serial.println(F(" "));
     Serial.print(F("New RPM setpoint: "));
     Serial.println(sVal);
+    Serial.print(F("Old RPM setpoint"));
+    Serial.println(xv_config.rpm_setpoint);
     Serial.println(F(" "));
   }
 }
@@ -716,7 +698,7 @@ void help() {
 
   Serial.print(F("XV Lidar Controller Firmware Version "));
   Serial.println(xv_config.version);
-  Serial.print(F("GetSurreal.com *"));
+  Serial.print(F("GetSurreal.com"));
 
   Serial.println(F(" "));
   Serial.println(F(" "));
@@ -735,7 +717,6 @@ void help() {
   Serial.println(F("  ShowDist      - Show the distance data"));
   Serial.println(F("  HideDist      - Hide the distance data"));
   Serial.println(F("  ShowAngle     - Show distance data for a specific angle (0 - 359 or 360 for all)"));
-  Serial.println(F("  HideAngle     - Hide distance data for all angles"));
   Serial.println(F("  MotorOff      - Stop spinning the lidar"));
   Serial.println(F("  MotorOn       - Enable spinning of the lidar"));
   Serial.println(F("  HideRaw       - Stop outputting the raw data from the lidar"));
@@ -799,4 +780,6 @@ void saveConfig() {
   EEPROM_writeAnything(0, xv_config);
   Serial.print(F("Config Saved."));
 }
+
+
 
