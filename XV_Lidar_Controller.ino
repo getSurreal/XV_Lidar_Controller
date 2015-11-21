@@ -18,7 +18,8 @@
 #include "EEPROMAnything.h"
 #include <SerialCommand.h>
 
-const int SHOW_ALL_ANGLES = 360;                                // value means 'display all angle data, 0..359'
+const int N_ANGLES = 360;                                       // # of angles (0..359)
+const int SHOW_ALL_ANGLES = N_ANGLES;                           // value means 'display all angle data, 0..359'
 
 struct EEPROM_Config {
   byte id;
@@ -61,23 +62,45 @@ unsigned long lastMillis = millis();
 const unsigned char COMMAND = 0xFA;        // Start of new packet
 const int INDEX_LO = 0xA0;                 // lowest index value
 const int INDEX_HI = 0xF9;                 // highest index value
-const int PACKET_LENGTH = 22;              // length of a complete packet
-int Packet[PACKET_LENGTH];                 // an input packet
-int ixPacket = 0;                          // index into 'Packet' array
+
 const int N_DATA_QUADS = 4;                // there are 4 groups of data elements
 const int N_ELEMENTS_PER_QUAD = 4;         // viz., 0=distance LSB; 1=distance MSB; 2=sig LSB; 3=sig MSB
+
 // Offsets to bytes within 'Packet'
-const int OFFSET_TO_INDEX = 1;
+const int OFFSET_TO_START = 0;
+const int OFFSET_TO_INDEX = OFFSET_TO_START + 1;
 const int OFFSET_TO_SPEED_LSB = OFFSET_TO_INDEX + 1;
 const int OFFSET_TO_SPEED_MSB = OFFSET_TO_SPEED_LSB + 1;
 const int OFFSET_TO_4_DATA_READINGS = OFFSET_TO_SPEED_MSB + 1;
-const int OFFSET_TO_CRC_L = PACKET_LENGTH - 2;
-const int OFFSET_TO_CRC_M = PACKET_LENGTH - 1;
+const int OFFSET_TO_CRC_L = OFFSET_TO_4_DATA_READINGS + (N_DATA_QUADS * N_ELEMENTS_PER_QUAD);
+const int OFFSET_TO_CRC_M = OFFSET_TO_CRC_L + 1;
+const int PACKET_LENGTH = OFFSET_TO_CRC_M + 1;  // length of a complete packet
 // Offsets to the (4) elements of each of the (4) data quads
 const int OFFSET_DATA_DISTANCE_LSB = 0;
 const int OFFSET_DATA_DISTANCE_MSB = OFFSET_DATA_DISTANCE_LSB + 1;
 const int OFFSET_DATA_SIGNAL_LSB = OFFSET_DATA_DISTANCE_MSB + 1;
 const int OFFSET_DATA_SIGNAL_MSB = OFFSET_DATA_SIGNAL_LSB + 1;
+
+int Packet[PACKET_LENGTH];                 // an input packet
+int ixPacket = 0;                          // index into 'Packet' array
+const int VALID_PACKET = 0;
+const int INVALID_PACKET = VALID_PACKET + 1;
+const byte INVALID_DATA_FLAG = (1 << 7);      // Mask for byte 1 of each data quad "Invalid data"
+/* REF: https://github.com/Xevel/NXV11/wiki
+The bit 7 of byte 1 seems to indicate that the distance could not be calculated.
+It's interesting to see that when this bit is set, the second byte is always 80, and the values of the first byte seem to be 
+only 02, 03, 21, 25, 35 or 50... When it's 21, then the whole block is 21 80 XX XX, but for all the other values it's the 
+data block is YY 80 00 00 maybe it's a code to say what type of error ? (35 is preponderant, 21 seems to be when the beam is 
+interrupted by the supports of the cover) .
+*/
+const byte STRENGTH_WARNING_FLAG = (1 << 6);  // Mask for byte 1 of each data quat "Strength Warning"
+/*
+The bit 6 of byte 1 is a warning when the reported strength is greatly inferior to what is expected at this distance. 
+This may happen when the material has a low reflectance (black material...), or when the dot does not have the expected 
+size or shape (porous material, transparent fabric, grid, edge of an object...), or maybe when there are parasitic 
+reflections (glass... ).
+*/
+const byte BAD_DATA_MASK = (INVALID_DATA_FLAG | STRENGTH_WARNING_FLAG);
 
 const byte eState_Find_COMMAND = 0;                        // 1st state: find 0xFA (COMMAND) in input stream
 const byte eState_Build_Packet = eState_Find_COMMAND + 1;  // 2nd state: build the packet
@@ -91,8 +114,9 @@ uint8_t inByte = 0;  // incoming serial byte
 uint8_t motor_rph_high_byte = 0; 
 uint8_t motor_rph_low_byte = 0;
 //uint8_t data0, data2;
-uint16_t dist[N_DATA_QUADS] = {0,0,0,0};      // thre are (4) distances, one for each data quad
-uint16_t quality[N_DATA_QUADS] = {0,0,0,0};   // same with 'quality'
+uint16_t aryDist[N_DATA_QUADS] = {0,0,0,0};      // thre are (4) distances, one for each data quad
+// so the maximum distance is 16383 mm (0x3FFF)
+uint16_t aryQuality[N_DATA_QUADS] = {0,0,0,0};   // same with 'quality'
 uint16_t motor_rph = 0;
 uint16_t startingAngle = 0;                   // the first scan angle (of group of 4, based on 'index'), in degrees (0..359)
 
@@ -124,16 +148,21 @@ void setup() {
   eState = eState_Find_COMMAND;
   for (ixPacket = 0; ixPacket < PACKET_LENGTH; ixPacket++)  // Initialize
     Packet[ixPacket] = 0;
-  ixPacket = 0;      
+  ixPacket = 0; 
+
+  //hideRaw();      // DSH ONLY!!!!!!!!!!!!
+  
 }
 // Main loop (forever)
 void loop() {
-  boolean bPacketOkay;                            // true = packet is okay (CRC valid)  
+  byte aryInvalidDataFlag[N_DATA_QUADS] = {0,0,0,0};  // non-zero = INVALID_DATA_FLAG or STRENGTH_WARNING_FLAG is set
+  
   sCmd.readSerial();  // check for incoming serial commands
   if (Serial1.available() > 0) {                  // read byte from LIDAR and relay to USB    
     inByte = Serial1.read();                      // get incoming byte:
     if (xv_config.raw_data)
       Serial.print(inByte, BYTE);                 // relay
+
     // Switch, based on 'eState':
     // State 1: We're scanning for 0xFA (COMMAND) in the input stream
     // State 2: Build a complete data packet
@@ -143,39 +172,71 @@ void loop() {
         Packet[ixPacket++] = inByte;              // store 1st byte of data into 'Packet'
       }
     }
-    else {                                        // eState == eState_Build_Packet
-      Packet[ixPacket++] = inByte;                // keep storing input into 'Packet'
-      if (ixPacket == PACKET_LENGTH) {            // we've got all the input bytes, so we're done building this packet
-        bPacketOkay = (eValidatePacket() == 0);   // Check packet CRC
-        startingAngle = processIndex(bPacketOkay);   // get the starting angle of this group (of 4)
-        processSpeed(bPacketOkay);                // process the speed
-        // process each of the (4) sets of data in the packet
-        for (int ix = 0; ix < N_DATA_QUADS; ix++) // process the distance
-          processDistance(bPacketOkay, ix);
-        for (int ix = 0; ix < N_DATA_QUADS; ix++) // process the signal strength (quality)
-          processSignalStrength(bPacketOkay, ix);
-        if (bPacketOkay) {
-          if (xv_config.show_dist) {              // show distance command is active
-            if (xv_config.show_angle == SHOW_ALL_ANGLES 
-            || (xv_config.show_angle >= startingAngle && xv_config.show_angle < startingAngle + N_DATA_QUADS)) {
-              for (int ix = 0; ix < N_DATA_QUADS; ix++) {
-                if ((xv_config.show_angle == SHOW_ALL_ANGLES) 
-                || (xv_config.show_angle == startingAngle + ix)) {                  
-                  Serial.print(startingAngle + ix);
-                  Serial.print(F(": "));
-                  Serial.print(int(dist[ix]));
-                  Serial.print(F(" ("));
-                  Serial.print(quality[ix]);
-                  Serial.println(F(")"));
-                }
+    else {                                            // eState == eState_Build_Packet
+      Packet[ixPacket++] = inByte;                    // keep storing input into 'Packet'
+      if (ixPacket == PACKET_LENGTH) {                // we've got all the input bytes, so we're done building this packet
+        if (eValidatePacket() == VALID_PACKET) {      // Check packet CRC
+          startingAngle = processIndex();             // get the starting angle of this group (of 4), e.g., 0, 4, 8, 12, ...        
+          processSpeed();                             // process the speed
+          // process each of the (4) sets of data in the packet        
+          for (int ix = 0; ix < N_DATA_QUADS; ix++)   // process the distance
+            aryInvalidDataFlag[ix] = processDistance(ix);
+          for (int ix = 0; ix < N_DATA_QUADS; ix++) { // process the signal strength (quality)
+            aryQuality[ix] = 0;
+            if (aryInvalidDataFlag[ix] == 0)
+              processSignalStrength(ix);
+          }
+          if (xv_config.show_dist) {                       // the 'ShowDistance' command is active
+            if (xv_config.show_angle == SHOW_ALL_ANGLES    // Are we showing all angles or just 1 angle?
+            || ((xv_config.show_angle >= startingAngle) && (xv_config.show_angle < startingAngle + N_DATA_QUADS))) {
+              for (int ix = 0; ix < N_DATA_QUADS; ix++) {  // process each of the (4) angles
+                if ((xv_config.show_angle == SHOW_ALL_ANGLES) || (xv_config.show_angle == startingAngle + ix)) {
+                  if (aryInvalidDataFlag[ix] == 0) {       // make sure that the 'Invalid Data' flag is clear                                       
+                    Serial.print(startingAngle + ix);
+                    Serial.print(F(": "));
+                    Serial.print(int(aryDist[ix]));
+                    Serial.print(F(" ("));
+                    Serial.print(aryQuality[ix]);
+                    Serial.println(F(")")); 
+                  }
+                  else {                    
+                    /* // UNCOMMENT BELOW TO PRINT 'INVALID' and 'SIGNAL' ERROR MESSAGES IN REAL-TIME
+                    Serial.print(startingAngle + ix);
+                    Serial.print(F(": "));
+                    for (int ix = 0; ix < PACKET_LENGTH; ix++) {
+                      if (Packet[ix] < 0x10)
+                        Serial.print("0");
+                      Serial.print(Packet[ix], HEX);
+                      Serial.print(" ");
+                    }
+                    for (int ix = 0; ix < N_DATA_QUADS; ix++) {
+                      if (aryInvalidDataFlag[ix] & INVALID_DATA_FLAG)
+                        Serial.print("{I}");
+                      else
+                        Serial.print("{_}");
+                    }
+                    for (int ix = 0; ix < N_DATA_QUADS; ix++) {
+                      if (aryInvalidDataFlag[ix] & STRENGTH_WARNING_FLAG) 
+                        Serial.print("{S}");
+                      else
+                        Serial.print("{_}");
+                    }                    
+                    Serial.println("");
+                    */ // UNCOMMENT ABOVE
+                  }  // else
+                }  // if ((xv_config.show_angle == SHOW_ALL_ANGLES) ...
               }  // or (int ix = 0; ix < N_DATA_QUADS; ix++)
             }  // if (xv_config.show_angle == SHOW_ALL_ANGLES ...
           }  // if (xv_config.show_dist)
-        }  // if (bPacketOkay)
+        }  // if (eValidatePacket() == 0
+        else {
+          //Serial.println("Skipping packet with bad CRC");          
+        }
         // initialize a bunch of stuff before we switch back to State 1
         for (int ix = 0; ix < N_DATA_QUADS; ix++) {
-          dist[ix] = 0;
-          quality[ix] = 0;
+          aryDist[ix] = 0;
+          aryQuality[ix] = 0;
+          aryInvalidDataFlag[ix] = 0;
         }
         for (ixPacket = 0; ixPacket < PACKET_LENGTH; ixPacket++)  // clear out this packet
           Packet[ixPacket] = 0;
@@ -197,7 +258,7 @@ void loop() {
  * processIndex - Process the packet element 'index'
  * index is the index byte in the 90 packets, going from A0 (packet 0, readings 0 to 3) to F9 
  *    (packet 89, readings 356 to 359).
- * Enter with: bValidData = true if packet is okay (good CRC)
+ * Enter with: N/A
  * Uses:       Packet
  *             ledState gets toggled if angle = 0
  *             ledPin = which pin the LED is connected to
@@ -209,56 +270,52 @@ void loop() {
  *             Serial.print
  * Returns:    The first angle (of 4) in the current 'index' group
  */
-uint16_t processIndex(boolean bValidData) {
+uint16_t processIndex() {
   uint16_t angle = 0;
-  if (bValidData) {
-    uint16_t data_4deg_index = Packet[OFFSET_TO_INDEX] - INDEX_LO;
-    angle = data_4deg_index * N_DATA_QUADS;     // 1st angle in the set of 4  
-    if (angle == 0) {
-      if (ledState) {
-        ledState = LOW;
-      } 
-      else {
-        ledState = HIGH;
+  uint16_t data_4deg_index = Packet[OFFSET_TO_INDEX] - INDEX_LO;
+  angle = data_4deg_index * N_DATA_QUADS;     // 1st angle in the set of 4  
+  if (angle == 0) {
+    if (ledState) {
+      ledState = LOW;
+    } 
+    else {
+      ledState = HIGH;
+    }
+    digitalWrite(ledPin, ledState);
+    if (xv_config.show_dist) {
+      curMillis = millis();
+      if(xv_config.show_angle == SHOW_ALL_ANGLES) {
+        /*
+        Serial.print(F("Time Interval: "));
+        Serial.println(curMillis - lastMillis);
+        */
       }
-      digitalWrite(ledPin, ledState);
-      if (xv_config.show_dist) {
-        curMillis = millis();
-        if(xv_config.show_angle == SHOW_ALL_ANGLES) {
-          /*
-          Serial.print(F("Time Interval: "));
-          Serial.println(curMillis - lastMillis);
-          */
-        }
-        lastMillis = curMillis;
-      }
-    } // if (angle == 0)
-  }  // if (bValidData)
+      lastMillis = curMillis;
+    }
+  } // if (angle == 0)
   return angle;
 }
 /*
  * processSpeed- Process the packet element 'speed'
  * speed is two-bytes of information, little-endian. It represents the speed, in 64th of RPM (aka value 
  *    in RPM represented in fixed point, with 6 bits used for the decimal part).
- * Enter with: bValidData = true if packet is okay (good CRC)
+ * Enter with: N/A
  * Uses:       Packet
  *             angle = if 0 then enable display of RPM and PWM
  *             xv_config.show_rpm = true if we're supposed to display RPM and PWM
  * Calls:      Serial.print
  */
-void processSpeed(boolean bValidData) {
-  if (bValidData) {
-    motor_rph_low_byte = Packet[OFFSET_TO_SPEED_LSB];
-    motor_rph_high_byte = Packet[OFFSET_TO_SPEED_MSB];
-    motor_rph = (motor_rph_high_byte << 8) | motor_rph_low_byte;
-    motor_rpm = float( (motor_rph_high_byte << 8) | motor_rph_low_byte ) / 64.0;
-    if (xv_config.show_rpm and startingAngle == 0) {
-      Serial.print(F("RPM: "));
-      Serial.print(motor_rpm);
-      Serial.print(F("  PWM: "));   
-      Serial.println(pwm_val);
-    }
-  }  // if (bValidData)
+void processSpeed() {
+  motor_rph_low_byte = Packet[OFFSET_TO_SPEED_LSB];
+  motor_rph_high_byte = Packet[OFFSET_TO_SPEED_MSB];
+  motor_rph = (motor_rph_high_byte << 8) | motor_rph_low_byte;
+  motor_rpm = float( (motor_rph_high_byte << 8) | motor_rph_low_byte ) / 64.0;
+  if (xv_config.show_rpm and startingAngle == 0) {
+    Serial.print(F("RPM: "));
+    Serial.print(motor_rpm);
+    Serial.print(F("  PWM: "));   
+    Serial.println(pwm_val);
+  }
 }
 /*
  * Data 0 to Data 3 are the 4 readings. Each one is 4 bytes long, and organized as follows :
@@ -269,42 +326,42 @@ void processSpeed(boolean bValidData) {
  */
 /*
  * processDistance- Process the packet element 'distance'
- * Enter with: bValidData = true if packet is okay (good CRC)
- *             iQuad = which one of the (4) readings to process, value = 0..3
+ * Enter with: iQuad = which one of the (4) readings to process, value = 0..3
  * Uses:       Packet
- *             dist[] = distance to object
+ *             dist[] = sets distance to object in binary: ISbb bbbb bbbb bbbb
+ *                                     so maximum distance is 0x3FFF (16383 decimal) millimeters (mm)
  * Calls:      N/A
+ * Exits with: 0 = okay
+ * Error:      1 << 7 = INVALID_DATA_FLAG is set
+ *             1 << 6 = STRENGTH_WARNING_FLAG is set
  */
-void processDistance(boolean bValidData, int iQuad) {
+byte processDistance(int iQuad) {
   uint8_t dataL, dataM;
-  dist[iQuad] = 0;                       // initialize
-  if (bValidData) {
-    int iOffset = (iQuad * N_DATA_QUADS) + OFFSET_TO_4_DATA_READINGS + OFFSET_DATA_DISTANCE_LSB;    
-    // byte 0 : <distance 7:0>
-    // byte 1 : <"invalid data" flag> <"strength warning" flag> <distance 13:8>
-    dataL = Packet[iOffset];             // first half of distance data
-    dataM = Packet[iOffset + 1];         // get MSB of distance data + flags
-    if ((dataM & 0x80) == 0)             // check for Invalid Flag
-      dist[iQuad] = dataL | ((dataM & 0x3F) << 8);
-  }  // if (bValidData)
+  aryDist[iQuad] = 0;                     // initialize
+  int iOffset = OFFSET_TO_4_DATA_READINGS + (iQuad * N_DATA_QUADS) + OFFSET_DATA_DISTANCE_LSB;    
+  // byte 0 : <distance 7:0> (LSB)
+  // byte 1 : <"invalid data" flag> <"strength warning" flag> <distance 13:8> (MSB)
+  dataM = Packet[iOffset + 1];           // get MSB of distance data + flags    
+  if (dataM & BAD_DATA_MASK)             // if either INVALID_DATA_FLAG or STRENGTH_WARNING_FLAG is set...
+    return dataM & BAD_DATA_MASK;        // ...then return non-zero
+  dataL = Packet[iOffset];               // LSB of distance data
+  aryDist[iQuad] = dataL | ((dataM & 0x3F) << 8);
+  return 0;                              // okay
 }
 /*
  * processSignalStrength- Process the packet element 'signal strength'
- * Enter with: bValidData = true if packet is okay (good CRC)
- *             iQuad = which one of the (4) readings to process, value = 0..3
+ * Enter with: iQuad = which one of the (4) readings to process, value = 0..3
  * Uses:       Packet
  *             quality[] = signal quality
  * Calls:      N/A
  */
-void processSignalStrength(boolean bValidData, int iQuad) {
+void processSignalStrength(int iQuad) {
   uint8_t dataL, dataM;
-  quality[iQuad] = 0;                        // initialize
-  if (bValidData) {
-    int iOffset = (iQuad * N_DATA_QUADS) + OFFSET_TO_4_DATA_READINGS + OFFSET_DATA_SIGNAL_LSB;    
-    dataL = Packet[iOffset];                  // signal strength LSB  
-    dataM = Packet[iOffset + 1];
-    quality[iQuad] = dataL | (dataM << 8);
-  }  // if (bValidData)
+  aryQuality[iQuad] = 0;                        // initialize
+  int iOffset = OFFSET_TO_4_DATA_READINGS + (iQuad * N_DATA_QUADS) + OFFSET_DATA_SIGNAL_LSB;    
+  dataL = Packet[iOffset];                  // signal strength LSB  
+  dataM = Packet[iOffset + 1];
+  aryQuality[iQuad] = dataL | (dataM << 8);
 }
 
 /*
@@ -336,15 +393,14 @@ byte eValidatePacket() {
     chk32 = (chk32 << 1) + CalcCRC[ix];            
   checksum = (chk32 & 0x7FFF) + (chk32 >> 15);
   checksum &= 0x7FFF;
-  
   b1a = checksum & 0xFF;
   b1b = Packet[OFFSET_TO_CRC_L];
   b2a = checksum >> 8;
   b2b = Packet[OFFSET_TO_CRC_M];
   if ((b1a == b1b) && (b2a == b2b)) 
-    return 0;                                  // okay
+    return VALID_PACKET;                       // okay
   else
-    return 1;                                  // non-zero = bad CRC
+    return INVALID_PACKET;                     // non-zero = bad CRC
 }
 
 /*
@@ -427,6 +483,7 @@ void showDist() {
   if (xv_config.raw_data == true) {
     hideRaw();
   }
+  xv_config.show_angle = SHOW_ALL_ANGLES;
   Serial.println(F(" "));
   Serial.print(F("Showing Distance data <Angle>: <dist.mm> (quality)}"));
   Serial.println(F(" "));
@@ -468,12 +525,16 @@ void showAngle() {
     Serial.println(F(" "));
   }
   else {
-    Serial.println(F(" "));
-    Serial.print(F("Showing Only Angle: "));
-    Serial.println(sVal);
-    Serial.println(F(" "));
     xv_config.show_angle = sVal;
-  }
+    Serial.println(F(" "));
+    if (xv_config.show_angle == SHOW_ALL_ANGLES)
+      Serial.print(F("Showing All Angles"));
+    else {
+      Serial.print(F("Showing Only Angle: "));
+      Serial.println(sVal);
+    }
+    Serial.println(F(" "));
+  }  // if (syntax_error)
 }
 
 void motorOff() {
