@@ -6,7 +6,14 @@
  http://www.getsurreal.com/products/xv-lidar-controller
  
  Modified to add CRC checking - Doug Hilton, WD0UG November, 2015 mailto: six.speed (at) yahoo (dot) com
- 
+ Modified to add ShowErrors / HideErrors - DSH
+ Modified to add ShowAngles - DSH
+ Modified SerialCommand.h to increase # of characters allowed to be input and command length - DSH
+           #define SERIALCOMMAND_BUFFER 100		// ORIGINAL: 32   MODIFIED BY DSH
+           #define SERIALCOMMAND_MAXCOMMANDLENGTH 20	// ORIGINAL: 8
+ ****************************************************************************************
+ NOTE: DON'T FORGET TO COPY THE NEW SerialCommand.h TO YOUR ARDUINO LIBRARY DIRECTORY!!!
+ ****************************************************************************************
  See README for additional information 
  
  The F() macro in the Serial statements tells the compiler to keep your strings in PROGMEM
@@ -85,7 +92,11 @@ int Packet[PACKET_LENGTH];                 // an input packet
 int ixPacket = 0;                          // index into 'Packet' array
 const int VALID_PACKET = 0;
 const int INVALID_PACKET = VALID_PACKET + 1;
-const byte INVALID_DATA_FLAG = (1 << 7);      // Mask for byte 1 of each data quad "Invalid data"
+const byte INVALID_DATA_FLAG = (1 << 7);   // Mask for byte 1 of each data quad "Invalid data"
+
+boolean aryAngles[N_ANGLES];               // true if we're supposed to display the corresponding angle
+boolean bShowAnglesFromArray = false;      // true if we're supposed to display multiple angles
+
 /* REF: https://github.com/Xevel/NXV11/wiki
 The bit 7 of byte 1 seems to indicate that the distance could not be calculated.
 It's interesting to see that when this bit is set, the second byte is always 80, and the values of the first byte seem to be 
@@ -108,17 +119,14 @@ int eState = eState_Find_COMMAND;
 PID rpmPID(&motor_rpm, &pwm_val, &xv_config.rpm_setpoint, xv_config.Kp, xv_config.Ki, xv_config.Kd, DIRECT);
 
 uint8_t inByte = 0;  // incoming serial byte
-//uint16_t data_status = 0;
-//uint16_t data_4deg_index = 0;
-//uint16_t data_loop_index = 0;
 uint8_t motor_rph_high_byte = 0; 
 uint8_t motor_rph_low_byte = 0;
-//uint8_t data0, data2;
 uint16_t aryDist[N_DATA_QUADS] = {0,0,0,0};      // thre are (4) distances, one for each data quad
 // so the maximum distance is 16383 mm (0x3FFF)
 uint16_t aryQuality[N_DATA_QUADS] = {0,0,0,0};   // same with 'quality'
 uint16_t motor_rph = 0;
-uint16_t startingAngle = 0;                   // the first scan angle (of group of 4, based on 'index'), in degrees (0..359)
+uint16_t startingAngle = 0;                      // the first scan angle (of group of 4, based on 'index'), in degrees (0..359)
+boolean bShowErrors = false;                     // true = show 3 kinds of errors
 
 SerialCommand sCmd;
 
@@ -149,9 +157,8 @@ void setup() {
   for (ixPacket = 0; ixPacket < PACKET_LENGTH; ixPacket++)  // Initialize
     Packet[ixPacket] = 0;
   ixPacket = 0; 
-
-  //hideRaw();      // DSH ONLY!!!!!!!!!!!!
-  
+  setLowRPM(xv_config.rpm_min);                      // Make the motor go as slow as possible
+  //hideRaw();     // DSH ONLY!!!!!!!!!!!!  
 }
 // Main loop (forever)
 void loop() {
@@ -186,51 +193,87 @@ void loop() {
             if (aryInvalidDataFlag[ix] == 0)
               processSignalStrength(ix);
           }
-          if (xv_config.show_dist) {                       // the 'ShowDistance' command is active
-            if (xv_config.show_angle == SHOW_ALL_ANGLES    // Are we showing all angles or just 1 angle?
-            || ((xv_config.show_angle >= startingAngle) && (xv_config.show_angle < startingAngle + N_DATA_QUADS))) {
-              for (int ix = 0; ix < N_DATA_QUADS; ix++) {  // process each of the (4) angles
-                if ((xv_config.show_angle == SHOW_ALL_ANGLES) || (xv_config.show_angle == startingAngle + ix)) {
-                  if (aryInvalidDataFlag[ix] == 0) {       // make sure that the 'Invalid Data' flag is clear                                       
+          if (xv_config.show_dist) {                         // the 'ShowDistance' command is active
+            if (bShowAnglesFromArray) {                      // we're going to display only angles that are in 'aryAngles'
+              for (int ix = 0; ix < N_DATA_QUADS; ix++) {
+                if (aryAngles[startingAngle + ix]) {         // if we're supposed to display that angle
+                  if (aryInvalidDataFlag[ix] == 0) {         // make sure that the 'Invalid Data' flag is clear                                                           
                     Serial.print(startingAngle + ix);
-                    Serial.print(F(": "));
-                    Serial.print(int(aryDist[ix]));
-                    Serial.print(F(" ("));
-                    Serial.print(aryQuality[ix]);
-                    Serial.println(F(")")); 
+                    Serial.print(F(","));
+                    Serial.println(int(aryDist[ix]));
+                    //Serial.print(F(" ("));
+                    //Serial.print(aryQuality[ix]);
+                    //Serial.println(F(")")); 
                   }
-                  else {                    
-                    /* // UNCOMMENT BELOW TO PRINT 'INVALID' and 'SIGNAL' ERROR MESSAGES IN REAL-TIME
+                  else if (bShowErrors) {
+                    /*
                     Serial.print(startingAngle + ix);
                     Serial.print(F(": "));
-                    for (int ix = 0; ix < PACKET_LENGTH; ix++) {
-                      if (Packet[ix] < 0x10)
-                        Serial.print("0");
-                      Serial.print(Packet[ix], HEX);
-                      Serial.print(" ");
+                    for (int jx = 0; jx < PACKET_LENGTH; jx++) {
+                      if (Packet[jx] < 0x10)
+                        Serial.print(F("0"));
+                      Serial.print(Packet[jx], HEX);
+                      Serial.print(F(" "));
                     }
-                    for (int ix = 0; ix < N_DATA_QUADS; ix++) {
+                    */
+                    if (aryInvalidDataFlag[ix] & INVALID_DATA_FLAG)
+                      Serial.print(F("{I}"));
+                    if (aryInvalidDataFlag[ix] & STRENGTH_WARNING_FLAG) 
+                      Serial.print(F("{S}"));
+                    if (aryInvalidDataFlag[ix])
+                      Serial.println(F(""));                      
+                  }  // else if (bShowErrors)
+                }  // if (aryAngles[startingAngle + ix])
+              }  // for (int ix = 0; ix < N_DATA_QUADS; ix++)
+            }  // if (bShowAnglesFromArray)
+            else {
+              if (xv_config.show_angle == SHOW_ALL_ANGLES    // Are we showing all angles or just 1 angle?
+              || ((xv_config.show_angle >= startingAngle) && (xv_config.show_angle < startingAngle + N_DATA_QUADS))) {
+                for (int ix = 0; ix < N_DATA_QUADS; ix++) {  // process each of the (4) angles
+                  if ((xv_config.show_angle == SHOW_ALL_ANGLES) || (xv_config.show_angle == startingAngle + ix)) {
+                    if (aryInvalidDataFlag[ix] == 0) {       // make sure that the 'Invalid Data' flag is clear                                                             
+                      Serial.print(startingAngle + ix);
+                      Serial.print(F(","));
+                      Serial.println(int(aryDist[ix]));
+                      //Serial.print(F(" ("));
+                      //Serial.print(aryQuality[ix]);
+                      //Serial.println(F(")")); 
+                    }
+                    else if (bShowErrors) {
+                      /*
+                      Serial.print(startingAngle + ix);
+                      Serial.print(F(": "));
+                      for (int jx = 0; jx < PACKET_LENGTH; jx++) {
+                        if (Packet[jx] < 0x10)
+                          Serial.print(F("0"));
+                        Serial.print(Packet[jx], HEX);
+                        Serial.print(F(" "));
+                      }
+                      */
                       if (aryInvalidDataFlag[ix] & INVALID_DATA_FLAG)
-                        Serial.print("{I}");
-                      else
-                        Serial.print("{_}");
-                    }
-                    for (int ix = 0; ix < N_DATA_QUADS; ix++) {
+                        Serial.print(F("{I}"));
                       if (aryInvalidDataFlag[ix] & STRENGTH_WARNING_FLAG) 
-                        Serial.print("{S}");
-                      else
-                        Serial.print("{_}");
-                    }                    
-                    Serial.println("");
-                    */ // UNCOMMENT ABOVE
-                  }  // else
-                }  // if ((xv_config.show_angle == SHOW_ALL_ANGLES) ...
-              }  // or (int ix = 0; ix < N_DATA_QUADS; ix++)
-            }  // if (xv_config.show_angle == SHOW_ALL_ANGLES ...
+                        Serial.print(F("{S}"));
+                      if (aryInvalidDataFlag[ix])
+                        Serial.println(F(""));                      
+                    }  // else if (bShowErrors)
+                  }  // if ((xv_config.show_angle == SHOW_ALL_ANGLES) ...
+                }  // or (int ix = 0; ix < N_DATA_QUADS; ix++)
+              }  // if (xv_config.show_angle == SHOW_ALL_ANGLES ...
+            }  // if (bShowAngles)            
           }  // if (xv_config.show_dist)
         }  // if (eValidatePacket() == 0
-        else {
-          //Serial.println("Skipping packet with bad CRC");          
+        else if (bShowErrors) {
+          /*
+          for (int ix = 0; ix < PACKET_LENGTH; ix++) {
+            if (Packet[ix] < 0x10)
+              Serial.print(F("0"));
+            Serial.print(Packet[ix], HEX);
+            Serial.print(F(" "));
+          }
+          Serial.println(F(" Bad CRC"));
+          */
+          Serial.println(F("C"));
         }
         // initialize a bunch of stuff before we switch back to State 1
         for (int ix = 0; ix < N_DATA_QUADS; ix++) {
@@ -412,8 +455,8 @@ void initEEPROM() {
   xv_config.motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
 
   xv_config.rpm_setpoint = 300;  // desired RPM
-  xv_config.rpm_min = 200;
-  xv_config.rpm_max = 300;
+  xv_config.rpm_min = 180;
+  xv_config.rpm_max = 349;
   xv_config.pwm_min = 100;
   xv_config.pwm_max = 1023;
   xv_config.sample_time = 20;
@@ -449,12 +492,34 @@ void initSerialCommands() {
   sCmd.addCommand("HideRPM",  hideRPM);
   sCmd.addCommand("ShowDist",  showDist);
   sCmd.addCommand("HideDist",  hideDist);
+  sCmd.addCommand("ShowAngles",  showAngles);      // this must be before "ShowAngle" to ensure correct match
+  sCmd.addCommand("HideAngles",  hideDist);
   sCmd.addCommand("ShowAngle",  showAngle);
   sCmd.addCommand("HideAngle",  hideDist);
   sCmd.addCommand("MotorOff", motorOff);
   sCmd.addCommand("MotorOn",  motorOn);
   sCmd.addCommand("HideRaw", hideRaw);
   sCmd.addCommand("ShowRaw",  showRaw);
+  sCmd.addCommand("ShowErrors", showErrors);
+  sCmd.addCommand("HideErrors", hideErrors);
+}
+/*
+ * showErrors
+ */
+void showErrors() {
+  bShowErrors = true;                                  // enable error display
+  Serial.println(F(" "));
+  Serial.print(F("Showing errors"));
+  Serial.println(F(" "));
+}
+/*
+ * hideErrors
+ */
+void hideErrors() {                                    // disable error display
+  bShowErrors = false;
+  Serial.println(F(" "));
+  Serial.print(F("Hiding errors"));
+  Serial.println(F(" "));
 }
 /*
  * showRPM
@@ -485,7 +550,7 @@ void showDist() {
   }
   xv_config.show_angle = SHOW_ALL_ANGLES;
   Serial.println(F(" "));
-  Serial.print(F("Showing Distance data <Angle>: <dist.mm> (quality)}"));
+  Serial.print(F("Showing Distance data <Angle>: <dist mm> (quality)}"));
   Serial.println(F(" "));
 }
 
@@ -498,6 +563,7 @@ void hideDist() {
 }
 
 void showAngle() {
+  bShowAnglesFromArray = false;                        // disable multi-angle display
   showDist(); 
   double sVal = 0.0;
   char *arg;
@@ -534,6 +600,116 @@ void showAngle() {
       Serial.println(sVal);
     }
     Serial.println(F(" "));
+  }  // if (syntax_error)
+}
+/*
+ * doShowAngles - Multi-angle range(s) implementation - DSH
+ * Command: ShowAngles ddd, ddd-ddd, etc.
+ * Command: HideAngles (remember to clear out aryAngles)
+ * Enter with: N/A
+ * Uses:       aryAngles (an array of 360 booleans) is set to appropriate values
+ * Calls:      showDist
+ * Exits with: N/A
+ * TEST THIS STRING:  ShowAngles 16-20, 300-305, 123-124, 10
+ */
+void showAngles() {
+  double sVal = 0.0;
+  char c, *arg;
+  boolean syntax_error = false;
+  int doing_from_to, from, to, ix, lToken, n_groups = 0;
+    
+  for (ix = 0; ix < N_ANGLES; ix++)                      // initialize
+    aryAngles[ix] = false;
+  doing_from_to = 0;                                     // state = doing 'from'
+  // Make sure that there is at least 1 angle or group of angles present
+  do {
+    arg = sCmd.next();                                   // get the next token
+    if (arg == NULL) {                                   // it's empty -- just exit
+      sCmd.readSerial();
+      arg = sCmd.next();
+      break;
+    }
+    // see if the token has an embedded "-", meaning from - to
+    lToken = strlen(arg);                                // get the length of the current token    
+    for (ix = 0; ix < lToken; ix++) {
+      c = arg[ix];
+      if (c == ',') {                                     // optional trailing comma
+        doing_from_to = 0;
+        break;
+      }
+      else if (c == '-') {                               // optional '-' means "from - to"
+        to = 0;
+        doing_from_to = 1;                               // from now on, we're doing 'to'
+      }
+      else if (c == ' ') {                               // ignore blanks
+        Serial.println(F("{ }"));
+      }                              
+      else if ((c >= '0') && (c <= '9')) {
+        if (doing_from_to == 0) {
+          from *= 10;
+          from += c - '0';
+          to = from;                                      // default to = from
+          n_groups++;                                     // count the number of active groups (s/b >= 1)
+        }
+        else {
+          to *= 10;
+          to += c - '0';
+        }
+      }
+      else {
+        syntax_error = true;
+        n_groups = 0;
+        break;
+      }
+    }  // for (ix = 0; ix < lToken; ix++) 
+    // validate 'from' and 'to' and set 'aryAngles' with correct values
+    if ((from >= 0) && (from < N_ANGLES) && (to >= 0) && (to < N_ANGLES)) {
+      if (to >= from) {
+        for (ix = from; ix <= to; ix++) {
+          aryAngles[ix] = true;
+        }
+      }
+      else {
+        syntax_error = true;      
+        break;
+      }
+    }
+    else {
+      syntax_error = true;
+      break;
+    }      
+    from = 0;
+    to = 0;
+    doing_from_to = 0;   
+  }  // do
+  while (arg != NULL);
+  if (n_groups == 0)
+    syntax_error = true;
+
+  // Handle syntax errors
+  if (syntax_error) {
+    bShowAnglesFromArray = false;                      // syntax error: disable multi-angle display
+    Serial.println(F(" "));
+    Serial.print(F("Incorrect syntax.  Example: ShowAngles 0, 15-30, 45-50, 10")); 
+    Serial.println(F(" "));
+    Serial.print(F("Use a space after each comma. No particular order is required.")); 
+    Serial.println(F(" "));
+    Serial.print(F("In a from-to pair, the 1st value must be lowest.")); 
+    Serial.println(F(" "));
+  }
+  else {                                                  // no errors detected, display the angles and start
+    // We're ready to process multiple angles    
+    Serial.println(F(""));
+    Serial.print(F("Angles:"));
+    for (int ix = 0; ix < N_ANGLES; ix++) {               // display the angle array
+      if(aryAngles[ix]) {
+        Serial.print(ix, DEC);
+        Serial.print(F(","));
+      }
+    }
+    Serial.println(F(""));    
+    bShowAnglesFromArray = true;                          // show multiple angles is enabled 
+    showDist(); 
   }  // if (syntax_error)
 }
 
@@ -588,6 +764,9 @@ void showRaw() {
   Serial.println(F(" "));
 }
 
+void setLowRPM(double sVal) {
+  xv_config.rpm_setpoint = sVal;
+}
 void setRPM() {
   double sVal = 0.0;
   char *arg;
@@ -786,7 +965,7 @@ void help() {
   Serial.println(F("  ShowConfig    - Show the running configuration"));
   Serial.println(F("  SaveConfig    - Save the running configuration to EEPROM"));
   Serial.println(F("  ResetConfig   - Restore the original configuration"));
-  Serial.println(F("  SetRPM        - Set the desired rotation speed (min: 200, max: 300)"));
+  Serial.println(F("  SetRPM        - Set the desired rotation speed (min: 180, max: 349)"));
   Serial.println(F("  SetKp         - Set the proportional gain"));
   Serial.println(F("  SetKi         - Set the integral gain"));
   Serial.println(F("  SetKd         - Set the derivative gain"));
@@ -797,6 +976,10 @@ void help() {
   Serial.println(F("  HideDist      - Hide the distance data"));
   Serial.println(F("  ShowAngle     - Show distance data for a specific angle (0 - 359 or 360 for all)"));
   Serial.println(F("  HideAngle     - Hide distance data for all angles"));
+  Serial.println(F("  ShowAngles    - Show distance data for a multiple angles (ShowAngles 0, 15-30, 45-50, 10)"));
+  Serial.println(F("  HideAngles    - Hide distance data for all angles"));
+  Serial.println(F("  ShowErrors    - Show all error messages"));
+  Serial.println(F("  HideErrors    - Hide error messages"));
   Serial.println(F("  MotorOff      - Stop spinning the lidar"));
   Serial.println(F("  MotorOn       - Enable spinning of the lidar"));
   Serial.println(F("  HideRaw       - Stop outputting the raw data from the lidar"));
