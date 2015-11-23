@@ -8,12 +8,7 @@
  Modified to add CRC checking - Doug Hilton, WD0UG November, 2015 mailto: six.speed (at) yahoo (dot) com
  Modified to add ShowErrors / HideErrors - DSH
  Modified to add ShowAngles - DSH
- Modified SerialCommand.h to increase # of characters allowed to be input and command length - DSH
-           #define SERIALCOMMAND_BUFFER 100		// ORIGINAL: 32   MODIFIED BY DSH
-           #define SERIALCOMMAND_MAXCOMMANDLENGTH 20	// ORIGINAL: 8
- ****************************************************************************************
- NOTE: DON'T FORGET TO COPY THE NEW SerialCommand.h TO YOUR ARDUINO LIBRARY DIRECTORY!!!
- ****************************************************************************************
+ 
  See README for additional information 
  
  The F() macro in the Serial statements tells the compiler to keep your strings in PROGMEM
@@ -157,8 +152,7 @@ void setup() {
   for (ixPacket = 0; ixPacket < PACKET_LENGTH; ixPacket++)  // Initialize
     Packet[ixPacket] = 0;
   ixPacket = 0; 
-  setLowRPM(xv_config.rpm_min);                      // Make the motor go as slow as possible
-  //hideRaw();     // DSH ONLY!!!!!!!!!!!!  
+
 }
 // Main loop (forever)
 void loop() {
@@ -197,16 +191,15 @@ void loop() {
             if (bShowAnglesFromArray) {                      // we're going to display only angles that are in 'aryAngles'
               for (int ix = 0; ix < N_DATA_QUADS; ix++) {
                 if (aryAngles[startingAngle + ix]) {         // if we're supposed to display that angle
-                  if (aryInvalidDataFlag[ix] == 0) {         // make sure that the 'Invalid Data' flag is clear                                                           
+                  if (aryInvalidDataFlag[ix] == 0) {         // make sure that the 'Invalid Data' flag is clear                                       
                     Serial.print(startingAngle + ix);
-                    Serial.print(F(","));
-                    Serial.println(int(aryDist[ix]));
-                    //Serial.print(F(" ("));
-                    //Serial.print(aryQuality[ix]);
-                    //Serial.println(F(")")); 
+                    Serial.print(F(": "));
+                    Serial.print(int(aryDist[ix]));
+                    Serial.print(F(" ("));
+                    Serial.print(aryQuality[ix]);
+                    Serial.println(F(")")); 
                   }
                   else if (bShowErrors) {
-                    /*
                     Serial.print(startingAngle + ix);
                     Serial.print(F(": "));
                     for (int jx = 0; jx < PACKET_LENGTH; jx++) {
@@ -215,7 +208,6 @@ void loop() {
                       Serial.print(Packet[jx], HEX);
                       Serial.print(F(" "));
                     }
-                    */
                     if (aryInvalidDataFlag[ix] & INVALID_DATA_FLAG)
                       Serial.print(F("{I}"));
                     if (aryInvalidDataFlag[ix] & STRENGTH_WARNING_FLAG) 
@@ -231,16 +223,15 @@ void loop() {
               || ((xv_config.show_angle >= startingAngle) && (xv_config.show_angle < startingAngle + N_DATA_QUADS))) {
                 for (int ix = 0; ix < N_DATA_QUADS; ix++) {  // process each of the (4) angles
                   if ((xv_config.show_angle == SHOW_ALL_ANGLES) || (xv_config.show_angle == startingAngle + ix)) {
-                    if (aryInvalidDataFlag[ix] == 0) {       // make sure that the 'Invalid Data' flag is clear                                                             
+                    if (aryInvalidDataFlag[ix] == 0) {       // make sure that the 'Invalid Data' flag is clear                                       
                       Serial.print(startingAngle + ix);
-                      Serial.print(F(","));
-                      Serial.println(int(aryDist[ix]));
-                      //Serial.print(F(" ("));
-                      //Serial.print(aryQuality[ix]);
-                      //Serial.println(F(")")); 
+                      Serial.print(F(": "));
+                      Serial.print(int(aryDist[ix]));
+                      Serial.print(F(" ("));
+                      Serial.print(aryQuality[ix]);
+                      Serial.println(F(")")); 
                     }
                     else if (bShowErrors) {
-                      /*
                       Serial.print(startingAngle + ix);
                       Serial.print(F(": "));
                       for (int jx = 0; jx < PACKET_LENGTH; jx++) {
@@ -249,7 +240,6 @@ void loop() {
                         Serial.print(Packet[jx], HEX);
                         Serial.print(F(" "));
                       }
-                      */
                       if (aryInvalidDataFlag[ix] & INVALID_DATA_FLAG)
                         Serial.print(F("{I}"));
                       if (aryInvalidDataFlag[ix] & STRENGTH_WARNING_FLAG) 
@@ -263,8 +253,7 @@ void loop() {
             }  // if (bShowAngles)            
           }  // if (xv_config.show_dist)
         }  // if (eValidatePacket() == 0
-        else if (bShowErrors) {
-          /*
+        else if (bShowErrors) {        
           for (int ix = 0; ix < PACKET_LENGTH; ix++) {
             if (Packet[ix] < 0x10)
               Serial.print(F("0"));
@@ -272,8 +261,6 @@ void loop() {
             Serial.print(F(" "));
           }
           Serial.println(F(" Bad CRC"));
-          */
-          Serial.println(F("C"));
         }
         // initialize a bunch of stuff before we switch back to State 1
         for (int ix = 0; ix < N_DATA_QUADS; ix++) {
@@ -455,8 +442,8 @@ void initEEPROM() {
   xv_config.motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
 
   xv_config.rpm_setpoint = 300;  // desired RPM
-  xv_config.rpm_min = 180;
-  xv_config.rpm_max = 349;
+  xv_config.rpm_min = 200;
+  xv_config.rpm_max = 300;
   xv_config.pwm_min = 100;
   xv_config.pwm_max = 1023;
   xv_config.sample_time = 20;
@@ -764,9 +751,6 @@ void showRaw() {
   Serial.println(F(" "));
 }
 
-void setLowRPM(double sVal) {
-  xv_config.rpm_setpoint = sVal;
-}
 void setRPM() {
   double sVal = 0.0;
   char *arg;
@@ -965,7 +949,7 @@ void help() {
   Serial.println(F("  ShowConfig    - Show the running configuration"));
   Serial.println(F("  SaveConfig    - Save the running configuration to EEPROM"));
   Serial.println(F("  ResetConfig   - Restore the original configuration"));
-  Serial.println(F("  SetRPM        - Set the desired rotation speed (min: 180, max: 349)"));
+  Serial.println(F("  SetRPM        - Set the desired rotation speed (min: 200, max: 300)"));
   Serial.println(F("  SetKp         - Set the proportional gain"));
   Serial.println(F("  SetKi         - Set the integral gain"));
   Serial.println(F("  SetKd         - Set the derivative gain"));
