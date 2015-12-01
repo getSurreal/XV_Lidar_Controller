@@ -20,6 +20,7 @@
  * 
  * You should have received a copy of the GNU General Public License
  * along with this library.  If not, see <http://www.gnu.org/licenses/>.
+ * MODIFIED 01DEC2015 by Doug Hilton to use case-insensitive character matching
  */
 #include "SerialCommand.h"
 
@@ -43,16 +44,33 @@ SerialCommand::SerialCommand()
  * to the handler function to deal with it.
  */
 void SerialCommand::addCommand(const char *command, void (*function)()) {
+  
+  int i, j, k;	// MODIFIED BY DSH TO FORCE COMMANDS TO UPPER CASE
+  commandList = (SerialCommandCallback *) realloc(commandList, (commandCount + 1) * sizeof(SerialCommandCallback));
+  char *cpNew = commandList[commandCount].command;
+  j = strlen(command);
+  for (i = 0; i < j; i++) {
+    k = *command;
+    if ((k >= 'a') && (k <= 'z')) {
+      *cpNew++ = *command & (-1 - ' ');
+    }
+    else {
+      *cpNew++ = *command;  
+    }
+    *cpNew = 0;    
+    command++;
+  }
+
+  commandList[commandCount].function = function;
+
   #ifdef SERIALCOMMAND_DEBUG
     Serial.print("Adding command (");
     Serial.print(commandCount);
     Serial.print("): ");
-    Serial.println(command);
+    char *cpShow = commandList[commandCount].command;
+    Serial.println(cpShow);
   #endif
 
-  commandList = (SerialCommandCallback *) realloc(commandList, (commandCount + 1) * sizeof(SerialCommandCallback));
-  strncpy(commandList[commandCount].command, command, SERIALCOMMAND_MAXCOMMANDLENGTH);
-  commandList[commandCount].function = function;
   commandCount++;
 }
 
@@ -85,6 +103,11 @@ void SerialCommand::readSerial() {
 
       char *command = strtok_r(buffer, delim, &last);   // Search for command at start of buffer
       if (command != NULL) {
+	int j = strlen(command);			// force commands to be upper-case [DSH]
+	for (int i = 0; i < j; i++) {
+	  if ((command[i] >= 'a') && (command[i] <= 'z'))
+	    command[i] &= -1 - ' ';
+	}
         boolean matched = false;
         for (int i = 0; i < commandCount; i++) {
           #ifdef SERIALCOMMAND_DEBUG
@@ -116,6 +139,8 @@ void SerialCommand::readSerial() {
     }
     else if (isprint(inChar)) {     // Only printable characters into the buffer
       if (bufPos < SERIALCOMMAND_BUFFER) {
+        if ((inChar >= 'a') && (inChar <= 'z'))		// force lower-case to upper-case [DSH]
+          inChar &= -1 - ' ';		
         buffer[bufPos++] = inChar;  // Put character into buffer
         buffer[bufPos] = '\0';      // Null terminate
       } else {
