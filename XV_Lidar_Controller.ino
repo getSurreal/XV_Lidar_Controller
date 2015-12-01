@@ -18,6 +18,10 @@
  ****************************************************************************************
  Modified to add ShowCSV and HideCSV command - DSH
  Modified EEPROM configuration to add new values and delete old ones - DSH
+ Modified to add ShowAll/HideAll command - DSH
+ Modified to let ShowInterval and ShowRPM run without ShowAngle
+ Modified to check that xv_config is not too big for EEPROM
+ Modified to delete ShowDist/HideDist commands, since that functionality is subsumed by ShowAngle(s)
  
  See README for additional information 
  
@@ -50,6 +54,7 @@ const byte _EEPROM_SAFETY_CHECK = (-1 - _EEPROM_ID); // used to validate that we
 const char szCURRENT_EEPROM_VERSION[6] = "1.3.0";    // as of 24NOV2015 - DSH
 
 const int _N_ANGLES = 360;                           // # of angles in a circle (0..359)
+const int  _EEPROM_SIZE = 1024;                      // Size of EEPROM, in bytes
 // These constants will let us read and write individual variables to the EEPROM - DSH
 const byte _BITS_PER_BYTE = 8;
 const byte _MASK_BYTE = (1 << _BITS_PER_BYTE) - 1;                // (value: 0xFF)
@@ -67,9 +72,8 @@ const int _LEN_DOUBLE = 4;
  */
 const byte _eOUT_UNKNOWN = 0;                 // Unknown or uninitialized (value: 0)
 const byte _eOUT_RAW = _eOUT_UNKNOWN + 1;     // ShowRaw = retransmit the seiral data to the USB port (value: 1)
-const byte _eOUT_DIST = _eOUT_RAW + 1;        // ShowDist = display distance data (value: 2)
-const byte _eOUT_ANGLE = _eOUT_DIST + 1;      // ShowAngle = display angle data (value: 3)
-const byte _eOUT_MAX = _eOUT_ANGLE + 1;       // WARNING: This value must fit in 8 bits (range: 0-255) (value: 4)
+const byte _eOUT_ANGLE = _eOUT_RAW + 1;       // ShowAngle = display angle data (value: 2)
+const byte _eOUT_MAX = _eOUT_ANGLE + 1;       // WARNING: This value must fit in 8 bits (range: 0-255) (value: 3)
 /*
  * An enumerated list of special output requirements, e.g., Show Errors, Show RPM, Show Interval, Show CSV format
  * NOTE: These are bit-values, so they can be individually set/cleared individually
@@ -264,7 +268,7 @@ uint16_t aryQuality[_N_DATA_QUADS] = {0,0,0,0};  // same with 'quality'
 uint16_t motor_rph = 0;
 uint16_t startingAngle = 0;                      // the first scan angle (of group of 4, based on 'index'), in degrees (0..359)
 int iCurrentAngle = 0;
-SerialCommand sCmd;                              // an instance of the serial device handler
+SerialCommand sCmd;                              // create an instance of the serial device handler object
 
 const int ledPin = 11;                           // blink the LED
 boolean ledState = LOW;                          // Toggle LOW/HIGH
@@ -276,14 +280,18 @@ int oldAngle = 0;
 void setup() {
   Serial.begin(115200);                           // USB serial
   // Software consistency checks (catchable programmer mistakes)
-  if ((_eOUT_MAX != 4) || (_eOUT_MAX > _MASK_BYTE)) { // limit decimal value to what will fit in 1 byte
+  if ((_eOUT_MAX != 3) || (_eOUT_MAX > _MASK_BYTE)) { // limit decimal value to what will fit in 1 byte
     Serial.println(F("SOFTWARE ERROR: _eOUT_MAX invalid. HALT!"));
     while (1);                                     // HANG!!!!!!
   }
   if (_eSHOW_MAX >= _BITS_PER_BYTE) {              // limit binary value to what can be expressed in 8-bits
     Serial.println(F("SOFTWARE ERROR: _eSHOW_MAX invalid. HALT!"));
     while (1);                                     // HANG!!!!
-  } 
+  }
+  if (_EEPROM_Config_LEN >= _EEPROM_SIZE) {
+    Serial.println(F("SOFTWARE ERROR: _EEPROM_Config_LEN >= _EEPROM_SIZE. HALT!"));
+    while (1);                                     // HANG!!!!
+  }
   EEPROM_readAnything(_EE_OFFSET_ID, xv_config);   // read the saved EEPROM configuration
   if(xv_config.id != _EEPROM_ID) {                 // If EEPROM ID has changed...
     Serial.println(F("EEPROM version is different from last time. Initializing EEPROM"));
@@ -297,7 +305,7 @@ void setup() {
   rpmPID.SetSampleTime(xv_config.sample_time);
   rpmPID.SetTunings(xv_config.Kp, xv_config.Ki, xv_config.Kd);
   rpmPID.SetMode(AUTOMATIC);
-  initSerialCommands();                             // Add commands to te 'sCmd' object
+  initSerialCommands();                            // Add commands to te 'sCmd' object
   pinMode(ledPin, OUTPUT);
   eState = _eState_Find_COMMAND;                   // Initialize the 'state' for the main loop
   for (ixPacket = 0; ixPacket < _PACKET_LENGTH; ixPacket++)  // Initialize
@@ -306,7 +314,7 @@ void setup() {
   if (xv_config.bMotorEnable == false)             // Turn on the motor
     forceMotorOn();                                // enable the motor
   forceRaw();                                      // Default mode = 'show raw data'
-  //hideRaw();                                     // DSH ONLY!!!!!!!!!!!!   
+  hideRaw();                                       // DSH ONLY!!!!!!!!!!!!   
 }
 
 // Main loop (forever)
@@ -341,12 +349,11 @@ void loop() {
               processSignalStrength(ix);
             } // if (aryInvalidDataFlag[ix] == 0)
           } // for (int ix = 0; ix < _N_DATA_QUADS; ix++)          
-          switch (eShow) {
-            case _eOUT_UNKNOWN :                                // eShow = Unknown or uninitialized (value: 0)
-              break;
-            case _eOUT_DIST :                                   // eShow = display distance data (value: 2)
+          switch (eShow) {            
+            //case _eOUT_DIST :                                   // eShow = display distance data
               //break;
-            case _eOUT_ANGLE :                                  // eShow = display angle data (value: 3)              
+            case _eOUT_UNKNOWN :                                // eShow = Unknown or uninitialized
+            case _eOUT_ANGLE :                                  // eShow = display angle data
               for (int ix = 0; ix < _N_DATA_QUADS; ix++) {
                 // We can't count on being able to display speed data at angle = 0
                 // so we look for the angle to go from a high value to a lower value
@@ -359,40 +366,44 @@ void loop() {
                 oldAngle = iCurrentAngle;
                 if (xv_config.aryAngles[startingAngle + ix]) {  // if we're supposed to display that angle                    
                   if (aryInvalidDataFlag[ix] == 0) {            // make sure that the 'Invalid Data' flag is clear
-                    if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {   // Display in CSV format?
-                      Serial.print(startingAngle + ix);
-                      Serial.print(F(","));
-                      Serial.print(int(aryDist[ix]));
-                      Serial.print(F(","));
-                      Serial.println(aryQuality[ix]);
-                    }
-                    else {
-                      Serial.print(startingAngle + ix);
-                      Serial.print(F(": "));
-                      Serial.print(int(aryDist[ix]));
-                      Serial.print(F(" ("));
-                      Serial.print(aryQuality[ix]);
-                      Serial.println(F(")"));                         
-                    }                      
+                    if (eShow == _eOUT_ANGLE) {                 // only display this stuff if we're specifically displaying angles
+                      if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {   // Display in CSV format?
+                        Serial.print(startingAngle + ix);
+                        Serial.print(F(","));
+                        Serial.print(int(aryDist[ix]));
+                        Serial.print(F(","));
+                        Serial.println(aryQuality[ix]);
+                      }
+                      else {
+                        Serial.print(startingAngle + ix);
+                        Serial.print(F(": "));
+                        Serial.print(int(aryDist[ix]));
+                        Serial.print(F(" ("));
+                        Serial.print(aryQuality[ix]);
+                        Serial.println(F(")"));                         
+                      }                                            
+                    } // if (eShow == _eOUT_ANGLE)
                   } // if (aryInvalidDataFlag[ix] == 0)
                   else if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS) { // If we're supposed to show errors...
                     if (xv_config.bMotorEnable) {                   // and if the motor is spinning...
-                      if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {     // Display in CSV format?
-                        Serial.print(startingAngle + ix);
-                        Serial.print(F(","));
-                        if (aryInvalidDataFlag[ix] & _INVALID_DATA_FLAG)
-                          Serial.println(F("I,"));
-                        if (aryInvalidDataFlag[ix] & _STRENGTH_WARNING_FLAG) 
-                          Serial.println(F("S,"));                                                
-                      }
-                      else {                                        // display in normal format
-                        Serial.print(startingAngle + ix);
-                        Serial.print(F(": "));
-                        if (aryInvalidDataFlag[ix] & _INVALID_DATA_FLAG)
-                          Serial.println(F("{I}"));
-                        if (aryInvalidDataFlag[ix] & _STRENGTH_WARNING_FLAG) 
-                          Serial.println(F("{S}"));                        
-                      }
+                      if (eShow == _eOUT_ANGLE) {                 // only display this stuff if we're specifically displaying angles
+                        if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {     // Display in CSV format?
+                          Serial.print(startingAngle + ix);
+                          Serial.print(F(","));
+                          if (aryInvalidDataFlag[ix] & _INVALID_DATA_FLAG)
+                            Serial.println(F("I,"));
+                          if (aryInvalidDataFlag[ix] & _STRENGTH_WARNING_FLAG) 
+                            Serial.println(F("S,"));                                                
+                        }
+                        else {                                        // display in normal format
+                          Serial.print(startingAngle + ix);
+                          Serial.print(F(": "));
+                          if (aryInvalidDataFlag[ix] & _INVALID_DATA_FLAG)
+                            Serial.println(F("{I}"));
+                          if (aryInvalidDataFlag[ix] & _STRENGTH_WARNING_FLAG) 
+                            Serial.println(F("{S}"));                        
+                        }                        
+                      } // if (eShow == _eOUT_ANGLE)
                     } // if (xv_config.bMotorEnable)
                   }  // else if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS)
                 }  // if (xv_config.aryAngles[startingAngle + ix])
@@ -465,7 +476,7 @@ uint16_t processIndex() {
       ledState = HIGH;
     }
     digitalWrite(ledPin, ledState);
-    if (((xv_config.eOUT & _MASK_eOUT_SHOW) == _eOUT_DIST) 
+    if (((xv_config.eOUT & _MASK_eOUT_SHOW) == _eOUT_UNKNOWN) 
      || ((xv_config.eOUT & _MASK_eOUT_SHOW) == _eOUT_ANGLE)) {
       curMillis = millis();
       if (xv_config.eOUT & _OUT_MOD_SHOW_INTERVAL) {
@@ -650,7 +661,6 @@ void initEEPROM() {
  * initSerialCommands - add operator commands to the 'sCmd' object
  */
 void initSerialCommands() {
-  sCmd.addCommand("help",       help);
   sCmd.addCommand("Help",       help);
   sCmd.addCommand("ShowConfig",  showConfig);
   sCmd.addCommand("SaveConfig", saveConfig);
@@ -662,8 +672,6 @@ void initSerialCommands() {
   sCmd.addCommand("SetSampleTime", setSampleTime);
   sCmd.addCommand("ShowRPM",  showRPM);
   sCmd.addCommand("HideRPM",  hideRPM);
-  //sCmd.addCommand("ShowDist",  showDist);                           // REMOVED because functionality is like showAngle(s) - DSH
-  sCmd.addCommand("HideDist",  hideDist);
   sCmd.addCommand("ShowAngles",  showAngles);
   sCmd.addCommand("HideAngles",  hideDist);
   sCmd.addCommand("ShowAngle",  showAngles);
@@ -680,64 +688,31 @@ void initSerialCommands() {
   sCmd.addCommand("HideCSV", hideCSV);
   sCmd.addCommand("ShowInterval", showInterval);
   sCmd.addCommand("HideInterval", hideInterval);
+  sCmd.addCommand("ShowAll", showAll);
+  sCmd.addCommand("HideAll", hideAll);
 }
 /*
- * showDist - Show distance data from LIDAR
- * NOTE: If no angles are set in 'aryAngles', then set them all to 'true'
- *       else, use what's already specified
+ * showAll - enable all the display modifier commands, i.e., RPM, Errors, Interval
  */
-void showDist() {
-  unsigned int current_eOUT = xv_config.eOUT;  // save the current value so we can restore the top 8-bits (modifiers)
-  unsigned int currentCommand = current_eOUT & _MASK_eOUT_SHOW; // isolate the command (bottom 8-bits)
-  boolean bAnyAnglesSet;
-  
-  if (currentCommand == _eOUT_DIST)                         // we're already showing distance, so just return 
-    return;  // xxxxxxx  IS THIS THE RIGHT DECISION?????????!!!!!!!
-  if ((currentCommand == _eOUT_UNKNOWN)
-   || (currentCommand == _eOUT_RAW)
-   || (currentCommand == _eOUT_ANGLE)) {       
-    xv_config.eOUT = _eOUT_DIST;                            // set "What we're displaying" to "Distance" & clear top 8-bits
-    xv_config.eOUT |= (current_eOUT & _MASK_eOUT_MODIFIER); // restore any modifier bits
-    EEPROM_writeAnything(_EE_OFFSET_eOUT, xv_config.eOUT);
-    bAnyAnglesSet = false;
-    if (xv_config.bShowAllAngles)                           // at least 1 angle is set
-      bAnyAnglesSet = true;
-    else {
-      bAnyAnglesSet = false;
-      for (int ix = 0; ix < _N_ANGLES; ix++) {
-        if (xv_config.aryAngles[ix]) {
-          bAnyAnglesSet = true;                             // at least 1 angle is set
-          break;
-        }      
-      } // for (int ix = 0; ix < _N_ANGLES; ix++)
-      if (bAnyAnglesSet == false) {                         // no angles are set...default to "ALL"
-        for (int ix = 0; ix < _N_ANGLES; ix++)
-          xv_config.aryAngles[ix] = true;
-        EEPROM_writeAnything(_EE_OFFSET_aryAngles, xv_config.aryAngles);
-        xv_config.bShowAllAngles = true;                  // Set 'show_angle' default
-        EEPROM_writeAnything(_EE_OFFSET_SHOW_ALL_ANGLES, xv_config.bShowAllAngles);
-      }
-    } // if not (xv_config.bShowAllAngles)
-    Serial.println(F(" "));
-    Serial.println(F("Showing Distance data <Angle>: <dist mm> (signal strength)}"));
-    if (!(xv_config.bMotorEnable))                          // Turn the motor ON if it's OFF
-      forceMotorOn();
-    }
-  else if (currentCommand == _eOUT_DIST) {
-    //xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    }
-  else {
-    Serial.println(F(" "));
-    Serial.println(F("INTERNAL ERROR @showDist - HALT"));   // someone (probably you) added a value to _eOUT_xxx values!!
-    while (1);                               // HANG!!!
-  }  
+void showAll() {
+  showRPM();                                        // enable showRPM
+  showErrors();                                     // enable showErrors
+  showInterval();                                   // enable showInterval
+}
+/*
+ * hideAll - disable all the display modifier commands, i.e., RPM, Errors, Interval
+ */
+void hideAll() {
+  hideRPM();                                        // disable showRPM
+  hideErrors();                                     // disable showErrors
+  hideInterval();                                   // disable showInterval
 }
 /*
  * hideDist - Hide distance data from LIDAR
  */
 void hideDist() {
   int eShow = (xv_config.eOUT & _MASK_eOUT_SHOW);
-  if ((eShow == _eOUT_DIST) || (eShow == _eOUT_ANGLE)) {    // you can only hide distance if it is currently active
+  if (eShow == _eOUT_ANGLE) {                               // you can only hide distance if it is currently active
     xv_config.eOUT &= -1 - _MASK_eOUT_SHOW;                 // keep top 8-bits and turn off bottom 8 bits before setting command
     xv_config.eOUT |= _eOUT_UNKNOWN;                        // set "What we're displaying" to "unknown"       
     EEPROM_writeAnything(_EE_OFFSET_eOUT, xv_config.eOUT);
@@ -1257,7 +1232,8 @@ void help() {
 
   Serial.println(F(" "));
   Serial.println(F(" "));
-
+  Serial.println(F("NOTE: All commands are case-insensitive"));
+  Serial.println(F(" "));
   Serial.println(F("What to display:"));
   Serial.println(F("  ShowRaw       - Enable the output of the raw LIDAR data (default)"));
   Serial.println(F("  HideRaw       - Stop outputting the raw data from the LIDAR"));
@@ -1267,14 +1243,16 @@ void help() {
   Serial.println(F("  HideAngle(s)  - Hide distance data for all angles"));
   Serial.println(F(" "));
   Serial.println(F("Display modifiers:"));
+  Serial.println(F("  ShowAll       - Show Errors + Interval + RPM"));
+  Serial.println(F("  HideAll       - Suppress Errors + Interval + RPM"));
   Serial.println(F("  ShowError(s)  - Show all error messages"));
   Serial.println(F("  HideError(s)  - Hide error messages"));
   Serial.println(F("  ShowInterval  - Show time interval per revolution in ms"));
   Serial.println(F("  HideInterval  - Hide time interval"));
-  Serial.println(F("  ShowCSV       - Show data in comma-separated variable (.csv) format"));
-  Serial.println(F("  HideCSV       - Hide csv format"));
   Serial.println(F("  ShowRPM       - Show the motor speed (RPM)"));
   Serial.println(F("  HideRPM       - Hide the motor speed"));
+  Serial.println(F("  ShowCSV       - Show data in comma-separated variable (.csv) format"));
+  Serial.println(F("  HideCSV       - Hide csv format"));
   Serial.println(F(" "));  
   Serial.println(F("Other commands:"));
   Serial.println(F("  MotorOff      - Stop spinning the LIDAR"));
@@ -1373,9 +1351,6 @@ void showConfig() {
       break;
     case _eOUT_RAW :
       Serial.println(F("Show Raw Data"));
-      break;
-    case _eOUT_DIST :
-      Serial.println(F("Show Distance data"));
       break;
     case _eOUT_ANGLE :
       Serial.println(F("Show Angle"));
