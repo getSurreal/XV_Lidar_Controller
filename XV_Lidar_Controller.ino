@@ -314,7 +314,7 @@ void setup() {
   if (xv_config.bMotorEnable == false)             // Turn on the motor
     forceMotorOn();                                // enable the motor
   forceRaw();                                      // Default mode = 'show raw data'
-  hideRaw();                                       // DSH ONLY!!!!!!!!!!!!   
+  //hideRaw();                                       // DSH ONLY!!!!!!!!!!!!   
 }
 
 // Main loop (forever)
@@ -349,95 +349,89 @@ void loop() {
               processSignalStrength(ix);
             } // if (aryInvalidDataFlag[ix] == 0)
           } // for (int ix = 0; ix < _N_DATA_QUADS; ix++)          
-          switch (eShow) {            
-            //case _eOUT_DIST :                                   // eShow = display distance data
-              //break;
-            case _eOUT_UNKNOWN :                                // eShow = Unknown or uninitialized
-            case _eOUT_ANGLE :                                  // eShow = display angle data
-              for (int ix = 0; ix < _N_DATA_QUADS; ix++) {
-                // We can't count on being able to display speed data at angle = 0
-                // so we look for the angle to go from a high value to a lower value
-                // which is safe to assume that it's either 0 or the closest value that is valid
-                iCurrentAngle = startingAngle + ix;             // convert unsigned to signed integer for compare
-                if (iCurrentAngle < oldAngle)                   // the angle has gone from, e.g., 359 to 0
-                  if (xv_config.eOUT & _OUT_MOD_SHOW_RPM)       // if we're supposed to be showing RPM...
-                    if (xv_config.bMotorEnable)                 // if the motor is spinning...
-                      showSpeed();                              // ...display RPM once per rev, at angle 0 (or as close as possible)
-                oldAngle = iCurrentAngle;
-                if (xv_config.aryAngles[startingAngle + ix]) {  // if we're supposed to display that angle                    
-                  if (aryInvalidDataFlag[ix] == 0) {            // make sure that the 'Invalid Data' flag is clear
+          if ((eShow == _eOUT_UNKNOWN) || (eShow == _eOUT_ANGLE)) {            
+            for (int ix = 0; ix < _N_DATA_QUADS; ix++) {
+              // We can't count on being able to display speed data at angle = 0
+              // so we look for the angle to go from a high value to a lower value
+              // which is safe to assume that it's either 0 or the closest value that is valid
+              iCurrentAngle = startingAngle + ix;             // convert unsigned to signed integer for compare
+              if (iCurrentAngle < oldAngle)                   // the angle has gone from, e.g., 359 to 0
+                if (xv_config.eOUT & _OUT_MOD_SHOW_RPM)       // if we're supposed to be showing RPM...
+                  if (xv_config.bMotorEnable)                 // if the motor is spinning...
+                    showSpeed();                              // ...display RPM once per rev, at angle 0 (or as close as possible)
+              oldAngle = iCurrentAngle;
+              if (xv_config.aryAngles[startingAngle + ix]) {  // if we're supposed to display that angle                    
+                if (aryInvalidDataFlag[ix] == 0) {            // make sure that the 'Invalid Data' flag is clear
+                  if (eShow == _eOUT_ANGLE) {                 // only display this stuff if we're specifically displaying angles
+                    if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {   // Display in CSV format?
+                      Serial.print(startingAngle + ix);
+                      Serial.print(F(","));
+                      Serial.print(int(aryDist[ix]));
+                      Serial.print(F(","));
+                      Serial.println(aryQuality[ix]);
+                    }
+                    else {
+                      Serial.print(startingAngle + ix);
+                      Serial.print(F(": "));
+                      Serial.print(int(aryDist[ix]));
+                      Serial.print(F(" ("));
+                      Serial.print(aryQuality[ix]);
+                      Serial.println(F(")"));                         
+                    }                                            
+                  } // if (eShow == _eOUT_ANGLE)
+                } // if (aryInvalidDataFlag[ix] == 0)
+                else if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS) { // If we're supposed to show errors...
+                  if (xv_config.bMotorEnable) {                   // and if the motor is spinning...
                     if (eShow == _eOUT_ANGLE) {                 // only display this stuff if we're specifically displaying angles
-                      if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {   // Display in CSV format?
+                      if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {     // Display in CSV format?
                         Serial.print(startingAngle + ix);
                         Serial.print(F(","));
-                        Serial.print(int(aryDist[ix]));
-                        Serial.print(F(","));
-                        Serial.println(aryQuality[ix]);
+                        if (aryInvalidDataFlag[ix] & _INVALID_DATA_FLAG)
+                          Serial.println(F("I,"));
+                        if (aryInvalidDataFlag[ix] & _STRENGTH_WARNING_FLAG) 
+                          Serial.println(F("S,"));                                                
                       }
-                      else {
+                      else {                                        // display in normal format
                         Serial.print(startingAngle + ix);
                         Serial.print(F(": "));
-                        Serial.print(int(aryDist[ix]));
-                        Serial.print(F(" ("));
-                        Serial.print(aryQuality[ix]);
-                        Serial.println(F(")"));                         
-                      }                                            
+                        if (aryInvalidDataFlag[ix] & _INVALID_DATA_FLAG)
+                          Serial.println(F("{I}"));
+                        if (aryInvalidDataFlag[ix] & _STRENGTH_WARNING_FLAG) 
+                          Serial.println(F("{S}"));                        
+                      }                        
                     } // if (eShow == _eOUT_ANGLE)
-                  } // if (aryInvalidDataFlag[ix] == 0)
-                  else if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS) { // If we're supposed to show errors...
-                    if (xv_config.bMotorEnable) {                   // and if the motor is spinning...
-                      if (eShow == _eOUT_ANGLE) {                 // only display this stuff if we're specifically displaying angles
-                        if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {     // Display in CSV format?
-                          Serial.print(startingAngle + ix);
-                          Serial.print(F(","));
-                          if (aryInvalidDataFlag[ix] & _INVALID_DATA_FLAG)
-                            Serial.println(F("I,"));
-                          if (aryInvalidDataFlag[ix] & _STRENGTH_WARNING_FLAG) 
-                            Serial.println(F("S,"));                                                
-                        }
-                        else {                                        // display in normal format
-                          Serial.print(startingAngle + ix);
-                          Serial.print(F(": "));
-                          if (aryInvalidDataFlag[ix] & _INVALID_DATA_FLAG)
-                            Serial.println(F("{I}"));
-                          if (aryInvalidDataFlag[ix] & _STRENGTH_WARNING_FLAG) 
-                            Serial.println(F("{S}"));                        
-                        }                        
-                      } // if (eShow == _eOUT_ANGLE)
-                    } // if (xv_config.bMotorEnable)
-                  }  // else if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS)
-                }  // if (xv_config.aryAngles[startingAngle + ix])
-              }  // for (int ix = 0; ix < _N_DATA_QUADS; ix++)
-            break;
-          } // switch (eShow)
-      }  // if (eValidatePacket() == 0
-      else {                                                  // Packet did not pass CRC check!
-        if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS) {          // Show errors?
-          /* DEBUGGING ONLY: Dump the contents of 'Packet'
-          for (int ix = 0; ix < _PACKET_LENGTH; ix++) {       // a full error display (dump Packet to screen)
-            if (Packet[ix] < 0x10)
-              Serial.print(F("0"));
-            Serial.print(Packet[ix], HEX);
-            Serial.print(F(" "));
-          }
-          */
-          Serial.println(F("CRC"));                           // an abbreviated error display
-        } // if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS)
-      } // if not (eValidatePacket() == 0
-      // initialize a bunch of stuff before we switch back to State 1
-      for (int ix = 0; ix < _N_DATA_QUADS; ix++) {
-        aryDist[ix] = 0;
-        aryQuality[ix] = 0;
-        aryInvalidDataFlag[ix] = 0;
-      }
-      for (ixPacket = 0; ixPacket < _PACKET_LENGTH; ixPacket++)  // clear out this packet
-        Packet[ixPacket] = 0;
-      ixPacket = 0;      
-      eState = _eState_Find_COMMAND;                // This packet is done -- look for next COMMAND byte        
+                  } // if (xv_config.bMotorEnable)
+                }  // else if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS)
+              }  // if (xv_config.aryAngles[startingAngle + ix])
+            }  // for (int ix = 0; ix < _N_DATA_QUADS; ix++)
+          } // if ((eShow == _eOUT_UNKNOWN) || (eSHow == _eOUT_ANGLE))
+        }  // if (eValidatePacket() == 0
+        else {                                                  // Packet did not pass CRC check!
+          if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS) {          // Show errors?
+            /* DEBUGGING ONLY: Dump the contents of 'Packet'
+            for (int ix = 0; ix < _PACKET_LENGTH; ix++) {       // a full error display (dump Packet to screen)
+              if (Packet[ix] < 0x10)
+                Serial.print(F("0"));
+              Serial.print(Packet[ix], HEX);
+              Serial.print(F(" "));
+            }
+            */
+            Serial.println(F("CRC"));                           // an abbreviated error display
+          } // if (xv_config.eOUT & _OUT_MOD_SHOW_ERRORS)
+        } // if not (eValidatePacket() == 0
+        // initialize a bunch of stuff before we switch back to State 1
+        for (int ix = 0; ix < _N_DATA_QUADS; ix++) {
+          aryDist[ix] = 0;
+          aryQuality[ix] = 0;
+          aryInvalidDataFlag[ix] = 0;
+        }
+        for (ixPacket = 0; ixPacket < _PACKET_LENGTH; ixPacket++)  // clear out this packet
+          Packet[ixPacket] = 0;
+        ixPacket = 0;      
+        eState = _eState_Find_COMMAND;                // This packet is done -- look for next COMMAND byte        
       }  // if (ixPacket == _PACKET_LENGTH)
     }  // if not (eState == _eState_Find_COMMAND)
   }  // if (Serial1.available() > 0)
-  //
   if (xv_config.bMotorEnable) {  
     rpmPID.Compute();
     if (pwm_val != pwm_last) {
@@ -481,9 +475,15 @@ uint16_t processIndex() {
       curMillis = millis();
       if (xv_config.eOUT & _OUT_MOD_SHOW_INTERVAL) {
         if (xv_config.bMotorEnable) {                 // if the motor is spinning...
-          Serial.print(F("Time interval ms:"));
-          Serial.println(curMillis - lastMillis);
-        }
+          if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {             // is display format "CSV"?
+            Serial.print(F("Interval:"));
+            Serial.println(curMillis - lastMillis);                        
+          }
+          else {
+            Serial.print(F("Time interval ms:"));
+            Serial.println(curMillis - lastMillis);            
+          }
+        } // if (xv_config.bMotorEnable)
       } // if (xv_config.eOUT & _OUT_MOD_SHOW_INTERVAL)
       lastMillis = curMillis;
     } // if (((xv_config.eOUT & _MASK_eOUT_SHOW) == _eOUT_DIST)...
@@ -515,7 +515,7 @@ void processSpeed() {
  * Calls:      processSpeed
  */
 void showSpeed() {
-  if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {             // is display format "CSV"?
+  if (xv_config.eOUT & _OUT_MOD_SHOW_CSV) {             // is display format "CSV"?    
     Serial.print(F("RPM:"));
     Serial.print(motor_rpm);
     Serial.print(F(",PWM:"));   
