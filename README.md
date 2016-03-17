@@ -28,8 +28,8 @@ The XV Lidar Controller receives the serial data from the XV Lidar looking for t
 
 
 ###Software to build from source
-* Arduino IDE (v1.0.6 tested. Newer or older may work)
-* Teensyduino - Software add-on to run Arduino sketches on the Teensy (v1.19 tested. Newer or older may work)
+* Arduino IDE (v1.6.5 and earlier)
+* Teensyduino - Software add-on to run Arduino sketches on the Teensy (v1.27)
  http://www.pjrc.com/teensy/teensyduino.html
 * Copy the included libraries to the Arduino libraries directory
 
