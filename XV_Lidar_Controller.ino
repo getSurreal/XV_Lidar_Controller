@@ -16,7 +16,7 @@
 #include "libraries/TimerThree/TimerThree.h" // used for ultrasonic PWM motor control
 #include "libraries/PID/PID.h"
 #include <EEPROM.h>
-#include "EEPROMAnything.h"
+#include "libraries/EEPROMAnything/EEPROMAnything.h"
 #include "libraries/SerialCommand/SerialCommand.h"
 
 const int N_ANGLES = 360;                                       // # of angles (0..359)
@@ -905,7 +905,7 @@ void help() {
   Serial.println(F(" "));
   Serial.println(F(" "));
 
-  Serial.println(F("List of available commands (case sensitive)"));
+  Serial.println(F("List of available commands"));
 
   Serial.println(F(" "));
   Serial.println(F("Control commands"));
