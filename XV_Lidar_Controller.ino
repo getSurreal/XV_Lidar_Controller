@@ -39,7 +39,7 @@ struct EEPROM_Config {
   double Kd;
 
   boolean motor_enable;  // to spin the laser or not.  No data when not spinning
-  boolean raw_data;  // to retransmit the seiral data to the USB port
+  boolean raw_data;  // to retransmit the serial data to the USB port
   boolean show_dist;  //  controlled by ShowDist and HideDist commands
   boolean show_rpm;  // controlled by ShowRPM and HideRPM commands
   boolean show_interval;  // true = show time interval, once per revolution, at angle=0
