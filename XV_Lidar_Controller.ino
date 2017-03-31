@@ -13,11 +13,11 @@
   The F() macro in the Serial statements tells the compiler to keep your strings in PROGMEM
 */
 
-#include "libraries/TimerThree/TimerThree.h" // used for ultrasonic PWM motor control
-#include "libraries/PID/PID.h"
+#include <TimerThree.h> // used for ultrasonic PWM motor control
+#include <PID.h>
 #include <EEPROM.h>
-#include "libraries/EEPROMAnything/EEPROMAnything.h"
-#include "libraries/SerialCommand/SerialCommand.h"
+#include <EEPROMAnything.h>
+#include <SerialCommand.h>
 
 const int N_ANGLES = 360;                                       // # of angles (0..359)
 const int SHOW_ALL_ANGLES = N_ANGLES;                           // value means 'display all angle data, 0..359'
