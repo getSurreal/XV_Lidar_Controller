@@ -1,5 +1,5 @@
 /*
-  XV Lidar Controller v1.3.0
+  XV Lidar Controller v1.4.0
 
   Copyright 2014-2016 James LeRoy getSurreal
   https://github.com/getSurreal/XV_Lidar_Controller
@@ -12,45 +12,44 @@
 
   The F() macro in the Serial statements tells the compiler to keep your strings in PROGMEM
 */
-
-#include <TimerThree.h> // used for ultrasonic PWM motor control
+#include <TimerThree.h>                   // used for ultrasonic PWM motor control
 #include <PID.h>
 #include <EEPROM.h>
 #include <EEPROMAnything.h>
 #include <SerialCommand.h>
 
-const int N_ANGLES = 360;                                       // # of angles (0..359)
-const int SHOW_ALL_ANGLES = N_ANGLES;                           // value means 'display all angle data, 0..359'
+const int N_ANGLES = 360;                // # of angles (0..359)
+const int SHOW_ALL_ANGLES = N_ANGLES;    // value means 'display all angle data, 0..359'
 
 struct EEPROM_Config {
   byte id;
   char version[6];
-  int motor_pwm_pin;    // pin connected to mosfet for motor speed control
-  double rpm_setpoint;  // desired RPM (uses double to be compatible with PID library)
+  int motor_pwm_pin;            // pin connected to mosfet for motor speed control
+  double rpm_setpoint;          // desired RPM (uses double to be compatible with PID library)
   double rpm_min;
   double rpm_max;
-  double pwm_max;       // max analog value.  probably never needs to change from 1023
-  double pwm_min;       // min analog pulse value to spin the motor
-  int sample_time;      // how often to calculate the PID values
+  double pwm_max;              // max analog value.  probably never needs to change from 1023
+  double pwm_min;              // min analog pulse value to spin the motor
+  int sample_time;             // how often to calculate the PID values
 
   // PID tuning values
   double Kp;
   double Ki;
   double Kd;
 
-  boolean motor_enable;  // to spin the laser or not.  No data when not spinning
-  boolean raw_data;  // to retransmit the serial data to the USB port
-  boolean show_dist;  //  controlled by ShowDist and HideDist commands
-  boolean show_rpm;  // controlled by ShowRPM and HideRPM commands
-  boolean show_interval;  // true = show time interval, once per revolution, at angle=0
-  boolean show_errors;  // Show CRC, signal strength and invalid data errors
+  boolean motor_enable;        // to spin the laser or not.  No data when not spinning
+  boolean raw_data;            // to retransmit the seiral data to the USB port
+  boolean show_dist;           // controlled by ShowDist and HideDist commands
+  boolean show_rpm;            // controlled by ShowRPM and HideRPM commands
+  boolean show_interval;       // true = show time interval, once per revolution, at angle=0
+  boolean show_errors;         // Show CRC, signal strength and invalid data errors
   boolean aryAngles[N_ANGLES]; // array of angles to display
 }
 xv_config;
 
-const byte EEPROM_ID = 0x06;  // used to validate EEPROM initialized
+const byte EEPROM_ID = 0x07;   // used to validate EEPROM initialized
 
-double pwm_val = 500;  // start with ~50% power
+double pwm_val = 500;          // start with ~50% power
 double pwm_last;
 double motor_rpm;
 unsigned long now;
@@ -133,8 +132,10 @@ const int ledPin = 13;
 
 #elif defined(__MK20DX256__)  // if Teensy 3.1
 const int ledPin = 13;
-#endif
 
+#elif defined(__MKL26Z64__)  // if Teensy LC
+const int ledPin = 13;
+#endif
 
 // initialization (before 'loop')
 void setup() {
@@ -143,12 +144,13 @@ void setup() {
     initEEPROM();
   }
   pinMode(xv_config.motor_pwm_pin, OUTPUT);
-  Serial.begin(115200);                            // USB serial
+  Serial.begin(115200);                    // USB serial
 #if defined(__AVR_ATmega32U4__)
-  Serial1.begin(115200);                           // XV LDS data
-
-#elif defined(__MK20DX256__) // if Teensy 3.1
-  Serial1.begin(115200);  // XV LDS data
+  Serial1.begin(115200);                   // XV LDS data
+#elif defined(__MK20DX256__)               // if Teensy 3.1
+  Serial1.begin(115200);                   // XV LDS data
+#elif defined(__MKL26Z64__)                // if Teensy LC
+  Serial1.begin(115200);                   // XV LDS data
 #endif
 
   Timer3.initialize(30);                           // set PWM frequency to 32.768kHz
@@ -403,8 +405,8 @@ byte eValidatePacket() {
    initEEPROM
 */
 void initEEPROM() {
-  xv_config.id = 0x06;
-  strcpy(xv_config.version, "1.3.0");
+  xv_config.id = 0x07;
+  strcpy(xv_config.version, "1.4.0");
 
 #if defined(__AVR_ATmega32U4__) && defined(CORE_TEENSY)  // if Teensy 2.0
   xv_config.motor_pwm_pin = 9;  // pin connected N-Channel Mosfet
@@ -414,6 +416,9 @@ void initEEPROM() {
 
 #elif defined(__MK20DX256__)  // if Teensy 3.1
   xv_config.motor_pwm_pin = 33;  // pin connected N-Channel Mosfet
+
+#elif defined(__MKL26Z64__)  // if Teensy LC
+  xv_config.motor_pwm_pin = 4;  // pin connected N-Channel Mosfet
 #endif
 
   xv_config.rpm_setpoint = 200;  // desired RPM
