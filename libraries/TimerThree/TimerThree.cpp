@@ -20,7 +20,7 @@ TimerThree Timer3;              // preinstatiate
 
 unsigned short TimerThree::pwmPeriod = 0;
 unsigned char TimerThree::clockSelectBits = 0;
-void (*TimerThree::isrCallback)() = NULL;
+void (*TimerThree::isrCallback)() = TimerThree::isrDefaultUnused;
 
 // interrupt service routine that wraps a user defined function supplied by attachInterrupt
 #if defined(__AVR__)
@@ -33,9 +33,16 @@ ISR(TIMER3_OVF_vect)
 void ftm2_isr(void)
 {
   uint32_t sc = FTM2_SC;
+  #ifdef KINETISL
+  if (sc & 0x80) FTM2_SC = sc;
+  #else
   if (sc & 0x80) FTM2_SC = sc & 0x7F;
+  #endif
   Timer3.isrCallback();
 }
 
 #endif
 
+void TimerThree::isrDefaultUnused()
+{
+}

@@ -39,7 +39,7 @@
   #define TIMER1_B_PIN   4
   #define TIMER1_ICP_PIN 4
 
-// Teensy 3.1
+// Teensy 3.1 / Teensy 3.2
 //
 #elif defined(__MK20DX256__)
   #define TIMER1_A_PIN   3
@@ -48,6 +48,26 @@
   #define TIMER3_A_PIN   32
   #define TIMER3_B_PIN   25
   #define TIMER3_ICP_PIN 32
+  
+// Teensy 3.5 / Teensy 3.6
+//
+#elif defined(__MK64FX512__) || defined(__MK66FX1M0__)
+  #define TIMER1_A_PIN   3
+  #define TIMER1_B_PIN   4
+  #define TIMER1_ICP_PIN 4
+  #define TIMER3_A_PIN   29
+  #define TIMER3_B_PIN   30
+  #define TIMER3_ICP_PIN 29
+  
+// Teensy-LC
+//
+#elif defined(__MKL26Z64__)
+  #define TIMER1_A_PIN   16
+  #define TIMER1_B_PIN   17
+  #define TIMER1_ICP_PIN 17
+  #define TIMER3_A_PIN   3
+  #define TIMER3_B_PIN   4
+  #define TIMER3_ICP_PIN 4
 
 // Arduino Mega
 //
@@ -96,9 +116,17 @@
   #define TIMER1_CLK_PIN 1
 
 // Wildfire - Wicked Devices
-/*  TODO: need Wildfire's pins_arduino.h to define a symbol
-    so we can tell the difference between Wildfile & Mighty-1284
-#elif defined(__AVR_ATmega1284P__)
+//
+#elif defined(__AVR_ATmega1284P__) && defined(WILDFIRE_VERSION) && WILDFIRE_VERSION >= 3
+  #define TIMER1_A_PIN   5   // PD5
+  #define TIMER1_B_PIN   8   // PD4
+  #define TIMER1_ICP_PIN 6   // PD6
+  #define TIMER1_CLK_PIN 23  // PB1
+  #define TIMER3_A_PIN   12  // PB6
+  #define TIMER3_B_PIN   13  // PB7
+  #define TIMER3_ICP_PIN 9   // PB5
+  #define TIMER3_CLK_PIN 0   // PD0
+#elif defined(__AVR_ATmega1284P__) && defined(WILDFIRE_VERSION) && WILDFIRE_VERSION < 3
   #define TIMER1_A_PIN   5   // PD5
   #define TIMER1_B_PIN   4   // PD4
   #define TIMER1_ICP_PIN 6   // PD6
@@ -107,9 +135,9 @@
   #define TIMER3_B_PIN   13  // PB7
   #define TIMER3_ICP_PIN 11  // PB5
   #define TIMER3_CLK_PIN 0   // PD0
-*/
 
 // Mighty-1284 - Maniacbug
+//
 #elif defined(__AVR_ATmega1284P__)
   #define TIMER1_A_PIN   12  // PD5
   #define TIMER1_B_PIN   13  // PD4
