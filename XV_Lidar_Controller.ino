@@ -1,5 +1,5 @@
 /*
-  XV Lidar Controller v1.4.0
+  XV Lidar Controller v1.4.1
 
   Copyright 2014-2016 James LeRoy getSurreal
   https://github.com/getSurreal/XV_Lidar_Controller
@@ -448,6 +448,7 @@ void initEEPROM() {
 void initSerialCommands() {
   sCmd.addCommand("help",        help);
   sCmd.addCommand("Help",        help);
+  sCmd.addCommand("?",        help);
   sCmd.addCommand("ShowConfig",  showConfig);
   sCmd.addCommand("SaveConfig",  saveConfig);
   sCmd.addCommand("ResetConfig", initEEPROM);

@@ -2,13 +2,13 @@ XV Lidar Controller
 ===================
 Copyright 2014-2018 James LeRoy getSurreal.com
 
-v1.4.0
+v1.4.1
 
 Control the Neato XV Series and Botvac Series Lidars with an Arduino compatible board.
 
 Used as an interface board to connect directly to the Neato XV/Botvac Lidar and control the rotation speed through Pulse Width Modulation (PWM).
 
-* http://www.getsurreal.com/products/xv-lidar-controller
+* http://www.getsurreal.com/products/lidar-controller-v2-0
 * https://github.com/getSurreal/XV_Lidar_Controller
 
 Based on work by:
