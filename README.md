@@ -1,6 +1,6 @@
 XV Lidar Controller
 ===================
-Copyright 2014-2018 James LeRoy getSurreal.com
+Copyright 2014-2020 James LeRoy getSurreal.com
 
 v1.4.1
 
@@ -41,6 +41,8 @@ The XV Lidar Controller receives the serial data from the XV/Botvac Lidar lookin
 Connect to the USB port at 115200 baud.  When sending commands use the newline character to signify the end of a command.
 
 ## Commands ##
+Help            - Show the help menu
+?               - Show the help menu
 
 ### Control commands ###
 * ShowConfig    - Show the running configuration
