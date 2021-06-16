@@ -1,6 +1,6 @@
 XV Lidar Controller
 ===================
-Copyright 2014-2020 James LeRoy getSurreal.com
+Copyright 2014-2021 James LeRoy getSurreal.com
 
 v1.4.1
 
@@ -33,8 +33,8 @@ The XV Lidar Controller receives the serial data from the XV/Botvac Lidar lookin
 
 
 ### Software to build from source ###
-* Arduino IDE v1.8.1 - v1.8.5
-* For Teensy board - Teensyduino v1.35 - v1.41 http://www.pjrc.com/teensy/teensyduino.html
+* Arduino IDE v1.8.1 - v1.8.13
+* For Teensy board - Teensyduino v1.35 - v1.53 http://www.pjrc.com/teensy/teensyduino.html
 
 
 ## Usage ##
