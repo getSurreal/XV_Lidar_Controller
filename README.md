@@ -25,7 +25,7 @@ The XV Lidar Controller receives the serial data from the XV/Botvac Lidar lookin
 
 ### Hardware ###
 * Neato XV/Botvac Lidar - Available on eBay
-* XV Lidar Controller Board by getSurreal http://www.getsurreal.com/xv-lidar-controller
+* XV Lidar Controller Board by getSurreal https://www.getsurreal.com/product/lidar-controller-v2-0/
      * v1.2 with Teensy 2.0 (XV Lidar only)
      * v1.3 with Arduino Pro Micro Clone (XV Lidar only)
      * v2.0 with Teensy LC (XV and Botvac Lidar)
